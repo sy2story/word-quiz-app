@@ -1,0 +1,16 @@
+id,word,meaning_ja,phrase_en,phrase_ja,example_en,example_ja,section,enabled,correct_count,wrong_count,last_result,last_answered_at,is_weak,consecutive_correct_count
+001,discharge,退院,push back my discharge date,退院日を延期する,She was discharged yesterday.,彼女は昨日退院した。,,TRUE,0,0,,,FALSE,0
+002,swelling,腫れ,The swelling went down,腫れが引いた,Apply ice to reduce the swelling.,腫れを抑えるために氷をあてて。,,TRUE,0,0,,,FALSE,0
+003,grateful,感謝している,Grateful for your help today,今日は助けてくれてありがとう,I'm truly grateful for them.,彼らに本当に感謝している。,,TRUE,0,0,,,FALSE,0
+004,prescription,処方箋,pick up my prescription,処方箋を受け取る,The doctor wrote a prescription.,医師が処方箋を書いた。,,TRUE,0,0,,,FALSE,0
+005,appointment,予約,reschedule my appointment,予約を取り直す,I have an appointment at 3 pm.,3時に予約がある。,,TRUE,0,0,,,FALSE,0
+006,refund,返金,request a refund,返金を依頼する,They offered a full refund.,全額返金してくれた。,,TRUE,0,0,,,FALSE,0
+007,deadline,締め切り,meet the deadline,締め切りに間に合わせる,The deadline is tomorrow.,締め切りは明日だ。,,TRUE,0,0,,,FALSE,0
+008,commute,通勤する,commute by train,電車で通勤する,My commute takes an hour.,通勤に1時間かかる。,,TRUE,0,0,,,FALSE,0
+009,errand,用事,run a quick errand,ちょっと用事を済ます,I have one more errand to do.,あと1つ用事がある。,,TRUE,0,0,,,FALSE,0
+010,leftover,残り物,reheat the leftover pasta,残り物のパスタを温め直す,We had leftovers for lunch.,昼に残り物を食べた。,,TRUE,0,0,,,FALSE,0
+011,reservation,予約,confirm the reservation,予約を確認する,I made a reservation for two.,2名で予約した。,,TRUE,0,0,,,FALSE,0
+012,humid,湿度の高い,Humid weather makes me tired,湿度の高い天気は疲れる,It's very humid today.,今日はとても蒸し暑い。,,TRUE,0,0,,,FALSE,0
+013,laundry,洗濯,fold the laundry,洗濯物をたたむ,I need to do the laundry.,洗濯をしないと。,,TRUE,0,0,,,FALSE,0
+014,recipe,レシピ,follow the recipe,レシピ通りに作る,Share the recipe with me.,レシピを教えて。,,TRUE,0,0,,,FALSE,0
+015,decent,まともな,find a decent place to eat,まともな食事処を見つける,That was a decent meal.,なかなか良い食事だった。,,TRUE,0,0,,,FALSE,0

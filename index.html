@@ -1,0 +1,142 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>英単語クイズ</title>
+
+  <link rel="manifest" href="./manifest.json">
+  <meta name="theme-color" content="#2563eb">
+  <meta name="apple-mobile-web-app-capable" content="yes">
+  <meta name="apple-mobile-web-app-title" content="単語クイズ">
+  <meta name="apple-mobile-web-app-status-bar-style" content="default">
+  <link rel="apple-touch-icon" href="./icon-192.png">
+
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="bg-blue-50 text-slate-800 min-h-screen">
+  <main class="app-container px-4 py-5">
+
+    <!-- ホーム画面 -->
+    <section id="home-screen">
+      <header class="mb-5">
+        <h1 class="text-2xl font-bold text-blue-600">英単語クイズ</h1>
+        <p class="text-xs text-slate-500 mt-1" id="last-updated">データ読み込み中…</p>
+      </header>
+
+      <div id="error-banner" class="hidden bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3 mb-4"></div>
+
+      <div class="bg-white rounded-xl shadow-sm p-4 mb-4 flex items-center justify-between">
+        <div>
+          <p class="text-xs text-slate-500">登録単語</p>
+          <p class="text-xl font-semibold" id="total-count">-</p>
+        </div>
+        <button id="reload-btn" type="button" class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-4 py-2 rounded-lg">
+          データを再読み込み
+        </button>
+      </div>
+
+      <div id="sections-list" class="space-y-3">
+        <!-- セクションカードはJSで挿入 -->
+      </div>
+    </section>
+
+    <!-- クイズ画面 -->
+    <section id="quiz-screen" hidden>
+      <header class="flex items-center justify-between mb-4">
+        <button id="quiz-back-btn" type="button" class="text-blue-600 text-sm font-medium">← 戻る</button>
+        <span id="quiz-progress" class="text-xs text-slate-500">1 / 10</span>
+      </header>
+
+      <article class="bg-white rounded-xl shadow-sm p-5 mb-4">
+        <p class="text-xs text-slate-500 mb-1">意味 / Hint</p>
+        <p id="quiz-meaning" class="text-lg font-semibold mb-4">-</p>
+
+        <p class="text-xs text-slate-500 mb-1">フレーズの意味</p>
+        <p id="quiz-phrase-ja" class="text-base mb-4">-</p>
+
+        <p class="text-xs text-slate-500 mb-1">フレーズ</p>
+        <p id="quiz-phrase-blank" class="text-lg font-medium leading-relaxed">-</p>
+      </article>
+
+      <!-- 入力エリア（回答前） -->
+      <div id="input-area" class="space-y-3">
+        <form id="answer-form" class="space-y-3" autocomplete="off">
+          <input
+            id="answer-input"
+            type="text"
+            inputmode="text"
+            autocapitalize="none"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="(____) に入る単語を入力"
+            class="w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none rounded-lg px-4 py-3 text-lg"
+          >
+          <button id="submit-btn" type="submit" class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white font-semibold py-3 rounded-lg" disabled>
+            提出
+          </button>
+        </form>
+        <div class="text-center">
+          <button id="skip-btn" type="button" class="text-sm text-slate-500 underline">
+            わからない（スキップ）
+          </button>
+        </div>
+      </div>
+
+      <!-- 結果エリア（回答後） -->
+      <div id="answer-area" class="hidden space-y-3">
+        <article id="result-card" class="rounded-xl shadow-sm p-5">
+          <p id="result-badge" class="text-lg font-bold mb-3">-</p>
+
+          <div id="your-answer-block" class="mb-3 hidden">
+            <p class="text-xs text-slate-500 mb-1">あなたの答え</p>
+            <p id="your-answer-text" class="text-base">-</p>
+          </div>
+
+          <p class="text-xs text-slate-500 mb-1">正解</p>
+          <p id="answer-word" class="text-xl font-bold text-blue-600 mb-3">-</p>
+
+          <p class="text-xs text-slate-500 mb-1">完成フレーズ</p>
+          <p id="answer-phrase" class="text-base">-</p>
+        </article>
+
+        <div id="speak-buttons" class="grid grid-cols-2 gap-2">
+          <button id="speak-phrase-btn" type="button" class="bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg">
+            🔊 フレーズを聞く
+          </button>
+          <button id="speak-word-btn" type="button" class="bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg">
+            🔊 単語を聞く
+          </button>
+        </div>
+
+        <button id="next-btn" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg mt-2">
+          次へ
+        </button>
+      </div>
+
+      <!-- クイズ終了画面 -->
+      <div id="quiz-summary" class="hidden bg-white rounded-xl shadow-sm p-5 text-center space-y-3">
+        <p class="text-lg font-semibold">セクション終了！</p>
+        <p id="quiz-summary-text" class="text-sm text-slate-600">-</p>
+        <button id="summary-back-btn" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg">
+          ホームに戻る
+        </button>
+      </div>
+    </section>
+
+  </main>
+
+  <script src="./config.js"></script>
+  <script src="./app.js" defer></script>
+  <script>
+    if ("serviceWorker" in navigator) {
+      window.addEventListener("load", () => {
+        navigator.serviceWorker.register("./service-worker.js")
+          .then(() => console.log("Service Worker registered"))
+          .catch(err => console.error("Service Worker registration failed:", err));
+      });
+    }
+  </script>
+</body>
+</html>

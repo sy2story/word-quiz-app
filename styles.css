@@ -1,0 +1,44 @@
+/* Tailwind CDN を主とし、ここには補助的な最小限のCSSのみ書く */
+
+.app-container {
+  max-width: 480px;
+  margin: 0 auto;
+}
+
+/* iOS Safe Area 対応 */
+body {
+  padding-bottom: env(safe-area-inset-bottom);
+}
+
+/* 大きめ余白 - 片手操作配慮 */
+button {
+  -webkit-tap-highlight-color: transparent;
+}
+
+/* 音声非対応時 */
+.no-speech #speak-buttons {
+  display: none;
+}
+
+/* 苦手バッジ */
+.weak-badge {
+  display: inline-block;
+  background: #fee2e2;
+  color: #b91c1c;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  margin-left: 0.4rem;
+}
+
+.mastered-badge {
+  display: inline-block;
+  background: #dcfce7;
+  color: #15803d;
+  font-size: 0.7rem;
+  font-weight: 600;
+  padding: 0.1rem 0.45rem;
+  border-radius: 9999px;
+  margin-left: 0.4rem;
+}
