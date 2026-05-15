@@ -385,6 +385,10 @@
     document.getElementById("quiz-phrase-blank").textContent =
       buildBlank(word.word, word.phraseEn).blank;
 
+    const wordCount = String(word.word || "").trim().split(/\s+/).filter(Boolean).length;
+    document.getElementById("quiz-word-count-hint").textContent =
+      wordCount >= 2 ? "(" + wordCount + "語)" : "";
+
     // 入力欄リセット、フォーカス
     const input = document.getElementById("answer-input");
     input.value = "";
