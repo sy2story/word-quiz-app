@@ -14,7 +14,10 @@
     lastStudiedAt: "wordQuiz_lastStudiedAt",
     cachedWords: "wordQuiz_cachedWords",
     cachedWordsUpdatedAt: "wordQuiz_cachedWordsUpdatedAt",
-    pendingAnswerLogs: "wordQuiz_pendingAnswerLogs"
+    pendingAnswerLogs: "wordQuiz_pendingAnswerLogs",
+    spreadsheetId: "wordQuiz_spreadsheetId",
+    spreadsheetName: "wordQuiz_spreadsheetName",
+    spreadsheetUrl: "wordQuiz_spreadsheetUrl"
   };
 
   // ====================================================
@@ -24,7 +27,13 @@
     words: [],
     sections: [],
     updatedAt: "",
-    quiz: null  // { sectionId, mode, words[], index, answered: bool }
+    quiz: null,  // { sectionId, mode, words[], index, answered: bool }
+    spreadsheetId: "",
+    spreadsheetName: "",
+    spreadsheetUrl: "",
+    sheetCtx: null,    // { headers, headerIndex, rowIndexById }
+    signedIn: false,
+    loadError: null    // { message, kind: "structure" | "network" | "auth" | "other" }
   };
 
   // ====================================================
@@ -111,126 +120,135 @@
   }
 
   // ====================================================
-  // データ取得
+  // データ取得（Sheets API 経由）
   // ====================================================
   async function loadWords() {
-    const url = (window.APPS_SCRIPT_URL || "").trim();
+    if (!state.spreadsheetId) {
+      return { data: [], updatedAt: "", source: "no-sheet" };
+    }
 
-    // URL設定済み → API経由で取得を試みる
-    if (url) {
-      try {
-        const res = await fetch(url + "?t=" + Date.now());
-        if (!res.ok) throw new Error("HTTP " + res.status);
-        const json = await res.json();
-        if (!json.success) throw new Error(json.message || "API returned success=false");
-        if (!Array.isArray(json.data)) throw new Error("data is not an array");
+    try {
+      const result = await window.WQSheets.loadWords(state.spreadsheetId);
 
-        // 成功 → LocalStorageキャッシュ更新
-        lsSet(STORAGE_KEYS.cachedWords, json.data);
-        lsSet(STORAGE_KEYS.cachedWordsUpdatedAt, json.updatedAt || new Date().toISOString());
+      state.sheetCtx = {
+        headers: result.headers,
+        headerIndex: result.headerIndex,
+        rowIndexById: result.rowIndexById
+      };
+      state.loadError = null;
 
-        return {
-          data: json.data,
-          updatedAt: json.updatedAt || new Date().toISOString(),
-          source: "api"
-        };
-      } catch (err) {
-        console.warn("API fetch failed, trying fallback:", err);
+      // キャッシュ保存（オフライン表示用）
+      lsSet(STORAGE_KEYS.cachedWords, result.data);
+      lsSet(STORAGE_KEYS.cachedWordsUpdatedAt, result.updatedAt);
 
-        // LocalStorageキャッシュフォールバック
+      return { data: result.data, updatedAt: result.updatedAt, source: "api" };
+    } catch (err) {
+      console.warn("Sheets API fetch failed:", err);
+      state.loadError = classifyLoadError(err);
+
+      // ネットワーク系エラーはキャッシュにフォールバック（構造エラーはキャッシュも使わない）
+      const isRecoverable = state.loadError.kind === "network" ||
+        state.loadError.kind === "auth";
+      if (isRecoverable) {
         const cached = lsGet(STORAGE_KEYS.cachedWords, null);
         if (Array.isArray(cached) && cached.length > 0) {
-          showError("単語データの読み込みに失敗しました。前回キャッシュを使用しています。");
+          state.loadError = null;
+          showError("オフラインのため、前回キャッシュで表示しています。", "info");
           return {
             data: cached,
             updatedAt: lsGet(STORAGE_KEYS.cachedWordsUpdatedAt, "") || "",
             source: "cache"
           };
         }
-
-        // 最終フォールバック → 同梱の sample-words.json
-        try {
-          const sampleRes = await fetch("./sample-words.json");
-          const sampleJson = await sampleRes.json();
-          showError("単語データの読み込みに失敗しました。サンプルデータで動作中です。");
-          return {
-            data: sampleJson.data || [],
-            updatedAt: sampleJson.updatedAt || "",
-            source: "sample"
-          };
-        } catch (sampleErr) {
-          showError("単語データの読み込みに失敗しました。通信状況を確認して、再読み込みしてください。");
-          return { data: [], updatedAt: "", source: "error" };
-        }
       }
-    }
 
-    // URL未設定 → sample-words.json を直接読む（ローカル開発・初期セットアップ用）
-    try {
-      const res = await fetch("./sample-words.json");
-      const json = await res.json();
-      showError(
-        "APIが未設定です。config.js に APPS_SCRIPT_URL を設定すると本番データに切り替わります。",
-        "info"
-      );
-      return {
-        data: json.data || [],
-        updatedAt: json.updatedAt || "",
-        source: "sample"
-      };
-    } catch (err) {
-      showError("サンプルデータの読み込みに失敗しました。");
       return { data: [], updatedAt: "", source: "error" };
     }
   }
 
-  // ====================================================
-  // 回答POST
-  // ====================================================
-  async function postAnswer(wordId, result, answeredAt) {
-    const url = (window.APPS_SCRIPT_URL || "").trim();
-    const payload = { wordId: wordId, result: result, answeredAt: answeredAt };
+  function classifyLoadError(err) {
+    const code = err && err.code;
+    if (code === "MISSING_COLUMNS") {
+      return {
+        kind: "structure",
+        message: "選んだシートには必要な列が揃っていません: " + (err.missing || []).join(", ") +
+          "。シート名は 'words'、1行目に必須列のヘッダがある状態にしてください。"
+      };
+    }
+    if (code === "EMPTY_SHEET") {
+      return {
+        kind: "structure",
+        message: "シートにデータが1行もありません。1行目にヘッダを書き、2行目以降に単語を追加してください。"
+      };
+    }
+    if (code === "TAB_NOT_FOUND") {
+      return {
+        kind: "structure",
+        message: "シート名 'words' のタブが見つかりません。タブ名を 'words' に変更するか、別のシートを選んでください。"
+      };
+    }
+    if (code === "FORBIDDEN") {
+      return {
+        kind: "auth",
+        message: "シートへのアクセス権限がありません。シートのオーナーで再度サインインしてください。"
+      };
+    }
+    if (code === "SHEET_NOT_FOUND") {
+      return {
+        kind: "structure",
+        message: "シートが見つかりません。削除された可能性があります。別のシートを選んでください。"
+      };
+    }
+    return {
+      kind: "network",
+      message: "シートの読み込みに失敗しました: " + (err.message || err)
+    };
+  }
 
-    if (!url) {
-      // 未設定時は失敗扱いせず、未送信キューにも入れない（ローカル動作確認モード）
+  // ====================================================
+  // 回答書き込み（Sheets API batchUpdate）
+  // ====================================================
+  async function recordAnswerToSheet(word, result, answeredAt) {
+    if (!state.spreadsheetId || !state.sheetCtx) {
+      console.warn("recordAnswer skipped: sheet not loaded");
+      return null;
+    }
+
+    // 失敗時オフラインキュー用に、書き込み内容を先に組み立てる
+    let built;
+    try {
+      built = window.WQSheets.buildAnswerCells(word, result, state.sheetCtx, answeredAt);
+    } catch (err) {
+      console.warn("buildAnswerCells failed:", err);
       return null;
     }
 
     try {
-      const res = await fetch(url, {
-        method: "POST",
-        headers: { "Content-Type": "text/plain;charset=utf-8" },
-        body: JSON.stringify(payload)
-      });
-      const json = await res.json();
-      if (!json.success) throw new Error(json.message || "Failed");
-      return json;
+      await window.WQSheets.writeCells(state.spreadsheetId, built.cells);
+      return built.next;
     } catch (err) {
-      console.warn("POST failed, queueing for retry:", err);
-      addPendingLog(payload);
+      console.warn("write failed, queueing for retry:", err);
+      addPendingLog({
+        spreadsheetId: state.spreadsheetId,
+        cells: built.cells,
+        queuedAt: new Date().toISOString()
+      });
       return null;
     }
   }
 
   async function retryPendingLogs() {
-    const url = (window.APPS_SCRIPT_URL || "").trim();
-    if (!url) return;
+    if (!window.WQAuth || !window.WQAuth.isSignedIn()) return;
 
     const logs = getPendingLogs();
     if (logs.length === 0) return;
 
     const remaining = [];
     for (const log of logs) {
+      // 互換性: 旧 GAS 形式（wordId/result/answeredAt）は破棄
+      if (!log.spreadsheetId || !Array.isArray(log.cells)) continue;
       try {
-        const res = await fetch(url, {
-          method: "POST",
-          headers: { "Content-Type": "text/plain;charset=utf-8" },
-          body: JSON.stringify(log)
-        });
-        const json = await res.json();
-        if (!json.success) {
-          remaining.push(log);
-        }
+        await window.WQSheets.writeCells(log.spreadsheetId, log.cells);
       } catch (e) {
         remaining.push(log);
       }
@@ -467,8 +485,18 @@
     }
     lsSet(STORAGE_KEYS.lastStudiedAt, answeredAt);
 
-    // バックグラウンドPOST
-    postAnswer(word.id, result, answeredAt);
+    // バックグラウンドで Sheets API に書き込み
+    recordAnswerToSheet(word, result, answeredAt).then(next => {
+      if (next) {
+        // ローカル状態を最新値で同期
+        word.correctCount = next.correct_count;
+        word.wrongCount = next.wrong_count;
+        word.lastResult = next.last_result;
+        word.lastAnsweredAt = next.last_answered_at;
+        word.isWeak = next.is_weak;
+        word.consecutiveCorrectCount = next.consecutive_correct_count;
+      }
+    });
   }
 
   function advanceQuestion() {
@@ -599,6 +627,139 @@
   }
 
   // ====================================================
+  // 接続状態 UI
+  // ====================================================
+  function updateConnectionUi() {
+    const connectBanner = document.getElementById("connect-banner");
+    const pickBanner = document.getElementById("pick-banner");
+    const sheetInfo = document.getElementById("sheet-info");
+    const sheetError = document.getElementById("sheet-error");
+    const statsPanel = document.getElementById("stats-panel");
+    const sectionsList = document.getElementById("sections-list");
+
+    const hide = el => { if (el) el.classList.add("hidden"); };
+    const show = el => { if (el) el.classList.remove("hidden"); };
+
+    // 初期化：全部隠す
+    hide(connectBanner);
+    hide(pickBanner);
+    hide(sheetInfo);
+    hide(sheetError);
+    hide(statsPanel);
+
+    if (!state.signedIn) {
+      show(connectBanner);
+      sectionsList.innerHTML = "";
+      document.getElementById("last-updated").textContent = "Google に接続して開始してください";
+      return;
+    }
+
+    if (!state.spreadsheetId) {
+      show(pickBanner);
+      sectionsList.innerHTML = "";
+      document.getElementById("last-updated").textContent = "シートを選択してください";
+      return;
+    }
+
+    // シート選択済み → 情報パネルを表示
+    show(sheetInfo);
+    document.getElementById("sheet-name").textContent =
+      state.spreadsheetName || "(名称未取得)";
+
+    const openLink = document.getElementById("sheet-open-link");
+    if (state.spreadsheetUrl) {
+      openLink.href = state.spreadsheetUrl;
+      openLink.classList.remove("hidden");
+    } else {
+      openLink.classList.add("hidden");
+    }
+
+    if (state.loadError) {
+      show(sheetError);
+      document.getElementById("sheet-error-message").textContent = state.loadError.message;
+      sectionsList.innerHTML = "";
+      document.getElementById("last-updated").textContent = "シート読み込みエラー";
+      return;
+    }
+
+    show(statsPanel);
+  }
+
+  async function handleSignIn() {
+    try {
+      await window.WQAuth.signIn();
+      state.signedIn = true;
+      updateConnectionUi();
+
+      // 以前選んだシートがあれば自動でロード
+      const savedId = lsGet(STORAGE_KEYS.spreadsheetId, "");
+      const savedName = lsGet(STORAGE_KEYS.spreadsheetName, "");
+      const savedUrl = lsGet(STORAGE_KEYS.spreadsheetUrl, "");
+      if (savedId) {
+        state.spreadsheetId = savedId;
+        state.spreadsheetName = savedName;
+        state.spreadsheetUrl = savedUrl;
+        await refresh();
+      } else {
+        updateConnectionUi();
+      }
+    } catch (err) {
+      console.error("signIn failed:", err);
+      showError("サインインに失敗しました: " + (err.message || err.type || err));
+    }
+  }
+
+  async function handlePickSheet() {
+    try {
+      const file = await window.WQAuth.pickSpreadsheet();
+      if (!file) return;  // キャンセル
+      state.spreadsheetId = file.id;
+      state.spreadsheetName = file.name || "";
+      state.spreadsheetUrl = file.url || "";
+      state.loadError = null;
+      lsSet(STORAGE_KEYS.spreadsheetId, state.spreadsheetId);
+      lsSet(STORAGE_KEYS.spreadsheetName, state.spreadsheetName);
+      lsSet(STORAGE_KEYS.spreadsheetUrl, state.spreadsheetUrl);
+      await refresh();
+    } catch (err) {
+      console.error("pickSheet failed:", err);
+      showError("シート選択に失敗しました: " + (err.message || err));
+    }
+  }
+
+  async function handleSignOut() {
+    try { await window.WQAuth.signOut(); } catch (e) { /* ignore */ }
+    state.signedIn = false;
+    state.spreadsheetId = "";
+    state.spreadsheetName = "";
+    state.spreadsheetUrl = "";
+    state.sheetCtx = null;
+    state.words = [];
+    state.sections = [];
+    state.loadError = null;
+    lsSet(STORAGE_KEYS.spreadsheetId, "");
+    lsSet(STORAGE_KEYS.spreadsheetName, "");
+    lsSet(STORAGE_KEYS.spreadsheetUrl, "");
+    updateConnectionUi();
+  }
+
+  // 起動時の自動サインイン試行（前回シートが localStorage にあるときだけ silent）
+  async function trySilentSignIn() {
+    const savedId = lsGet(STORAGE_KEYS.spreadsheetId, "");
+    if (!savedId) return false;
+    try {
+      await window.WQAuth.getAccessToken();   // 内部で prompt:"" のサイレント取得
+      state.signedIn = true;
+      state.spreadsheetId = savedId;
+      state.spreadsheetName = lsGet(STORAGE_KEYS.spreadsheetName, "");
+      state.spreadsheetUrl = lsGet(STORAGE_KEYS.spreadsheetUrl, "");
+      return true;
+    } catch (e) {
+      return false;
+    }
+  }
+
+  // ====================================================
   // 初期化
   // ====================================================
   async function init() {
@@ -615,6 +776,17 @@
     // イベントバインド
     document.getElementById("sections-list").addEventListener("click", handleSectionsClick);
     document.getElementById("reload-btn").addEventListener("click", refresh);
+
+    // 接続関連ボタン
+    document.getElementById("signin-btn").addEventListener("click", handleSignIn);
+    document.getElementById("pick-btn").addEventListener("click", handlePickSheet);
+    document.getElementById("change-sheet-btn").addEventListener("click", handlePickSheet);
+    document.getElementById("signout-btn").addEventListener("click", handleSignOut);
+    document.getElementById("signout-btn-early").addEventListener("click", handleSignOut);
+
+    // シートエラー用ボタン
+    document.getElementById("sheet-error-retry").addEventListener("click", refresh);
+    document.getElementById("sheet-error-repick").addEventListener("click", handlePickSheet);
 
     // フォームsubmit & 入力フィールドの活性制御
     document.getElementById("answer-form").addEventListener("submit", e => {
@@ -639,16 +811,32 @@
     document.getElementById("quiz-back-btn").addEventListener("click", backToHome);
     document.getElementById("summary-back-btn").addEventListener("click", backToHome);
 
-    await refresh();
+    // 初期 UI
+    updateConnectionUi();
+
+    // 前回シートがあれば silent サインイン → ロード
+    const silent = await trySilentSignIn();
+    if (silent) {
+      await refresh();
+    }
   }
 
   async function refresh() {
     showError("");
+    if (!state.signedIn || !state.spreadsheetId) {
+      updateConnectionUi();
+      return;
+    }
     const result = await loadWords();
     state.words = result.data;
     state.updatedAt = result.updatedAt;
     state.sections = splitIntoSections(state.words);
-    renderHome();
+    updateConnectionUi();
+
+    // ロードエラー時はエラーパネルが既に出ているのでホームは描画しない
+    if (!state.loadError) {
+      renderHome();
+    }
 
     // 未送信ログ再送（非同期、結果待たない）
     retryPendingLogs();

@@ -1,4 +1,5 @@
-# config.js
+config.js
 .DS_Store
 node_modules/
 *.log
+.claude/*

@@ -1,9 +1,16 @@
-// このファイルをコピーして config.js を作成し、Apps Script Webアプリの /exec URLを設定してください。
+// このファイルをコピーして config.js を作成し、必要な値を埋めてください。
 // config.js は .gitignore で除外されています。
 //
-// 例:
-//   window.APPS_SCRIPT_URL = "https://script.google.com/macros/s/AKfycbx.../exec";
+// Google Cloud Console で発行した値を貼り付けます。
+//   - GOOGLE_CLIENT_ID: OAuth 2.0 クライアントID
+//       例: "123456789012-xxxxxxxx.apps.googleusercontent.com"
+//   - GOOGLE_API_KEY:   Picker API 用 API キー
+//       例: "AIzaSyA..."
 //
-// URLが空文字列の場合、ローカルの sample-words.json をフォールバックとして読み込みます。
+// これらは公開しても問題ない値です（JavaScript 生成元 / HTTP リファラ制限
+// が効いているため、他ドメインから使われても弾かれます）。
+//
+// 詳細は docs/SETUP.md を参照。
 
-window.APPS_SCRIPT_URL = "";
+window.GOOGLE_CLIENT_ID = "";
+window.GOOGLE_API_KEY = "";

@@ -14,6 +14,11 @@
 
   <script src="https://cdn.tailwindcss.com"></script>
   <link rel="stylesheet" href="./styles.css">
+
+  <!-- Google Identity Services (OAuth トークン取得) -->
+  <script src="https://accounts.google.com/gsi/client" async defer></script>
+  <!-- Google API クライアント (Picker API ロード用) -->
+  <script src="https://apis.google.com/js/api.js" async defer></script>
 </head>
 <body class="bg-blue-50 text-slate-800 min-h-screen">
   <main class="app-container px-4 py-5">
@@ -27,7 +32,83 @@
 
       <div id="error-banner" class="hidden bg-red-50 border border-red-200 text-red-700 text-sm rounded-md p-3 mb-4"></div>
 
-      <div class="bg-white rounded-xl shadow-sm p-4 mb-4 flex items-center justify-between">
+      <!-- 接続バナー：未接続のとき -->
+      <div id="connect-banner" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4">
+        <p class="text-sm font-semibold mb-2">Google スプレッドシートを接続して開始</p>
+        <p class="text-xs text-slate-600 leading-relaxed mb-3">
+          このアプリは <strong>あなたが選んだスプレッドシートだけ</strong> を読み書きします。
+          他のファイルにはアクセスしません。データは Google アカウントに残ったままです。
+        </p>
+        <button id="signin-btn" type="button"
+          class="w-full bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg">
+          Google でサインイン
+        </button>
+      </div>
+
+      <!-- 接続バナー：サインイン済みでシート未選択 -->
+      <div id="pick-banner" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4">
+        <p class="text-sm font-semibold mb-2">単語帳シートを選んでください</p>
+        <p class="text-xs text-slate-600 leading-relaxed mb-3">
+          シート名 <code class="bg-slate-100 px-1 rounded">words</code> の中に、
+          <code class="bg-slate-100 px-1 rounded">id</code>,
+          <code class="bg-slate-100 px-1 rounded">word</code>,
+          <code class="bg-slate-100 px-1 rounded">meaning_ja</code>,
+          <code class="bg-slate-100 px-1 rounded">phrase_en</code>,
+          <code class="bg-slate-100 px-1 rounded">phrase_ja</code> 列があるシートを選んでください。
+        </p>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="pick-btn" type="button"
+            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium py-2 rounded-lg">
+            シートを選択
+          </button>
+          <button id="signout-btn-early" type="button"
+            class="bg-white border border-slate-300 text-slate-600 text-sm font-medium py-2 rounded-lg">
+            サインアウト
+          </button>
+        </div>
+      </div>
+
+      <!-- 接続済み情報パネル -->
+      <div id="sheet-info" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4">
+        <div class="flex items-start justify-between gap-3">
+          <div class="min-w-0">
+            <p class="text-xs text-slate-500">接続中のシート</p>
+            <p id="sheet-name" class="text-sm font-semibold truncate">-</p>
+            <a id="sheet-open-link" href="#" target="_blank" rel="noopener noreferrer"
+              class="hidden text-xs text-blue-600 hover:underline mt-1 inline-block">
+              シートを開く ↗
+            </a>
+          </div>
+          <div class="flex gap-2 shrink-0">
+            <button id="change-sheet-btn" type="button"
+              class="text-xs bg-white border border-blue-200 text-blue-600 px-2 py-1 rounded">
+              変更
+            </button>
+            <button id="signout-btn" type="button"
+              class="text-xs bg-white border border-slate-300 text-slate-600 px-2 py-1 rounded">
+              サインアウト
+            </button>
+          </div>
+        </div>
+      </div>
+
+      <!-- シート読み込みエラー時の案内パネル -->
+      <div id="sheet-error" class="hidden bg-red-50 border border-red-200 rounded-xl p-4 mb-4">
+        <p class="text-sm font-semibold text-red-700 mb-1">シートを読み込めませんでした</p>
+        <p id="sheet-error-message" class="text-xs text-red-700 leading-relaxed mb-3">-</p>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="sheet-error-retry" type="button"
+            class="bg-white border border-red-300 text-red-700 text-sm font-medium py-2 rounded-lg">
+            再読み込み
+          </button>
+          <button id="sheet-error-repick" type="button"
+            class="bg-red-600 hover:bg-red-700 text-white text-sm font-medium py-2 rounded-lg">
+            別のシートを選ぶ
+          </button>
+        </div>
+      </div>
+
+      <div id="stats-panel" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4 items-center justify-between flex">
         <div>
           <p class="text-xs text-slate-500">登録単語</p>
           <p class="text-xl font-semibold" id="total-count">-</p>
@@ -128,6 +209,8 @@
   </main>
 
   <script src="./config.js"></script>
+  <script src="./auth.js" defer></script>
+  <script src="./sheets.js" defer></script>
   <script src="./app.js" defer></script>
   <script>
     if ("serviceWorker" in navigator) {

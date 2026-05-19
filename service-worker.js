@@ -1,9 +1,11 @@
-const CACHE_NAME = "word-quiz-app-v2";
+const CACHE_NAME = "word-quiz-app-v4";
 
 const STATIC_ASSETS = [
   "./",
   "./index.html",
   "./app.js",
+  "./auth.js",
+  "./sheets.js",
   "./styles.css",
   "./config.js",
   "./manifest.json",
@@ -43,8 +45,16 @@ self.addEventListener("activate", event => {
 self.addEventListener("fetch", event => {
   const requestUrl = new URL(event.request.url);
 
-  // Apps Script API は常にネットワークから取得する（キャッシュしない）
-  if (requestUrl.hostname.includes("script.google.com")) {
+  // Apps Script API / Google 認証・API 系は常にネットワークから取得する（キャッシュしない）
+  const networkOnlyHosts = [
+    "script.google.com",
+    "accounts.google.com",
+    "apis.google.com",
+    "sheets.googleapis.com",
+    "www.googleapis.com",
+    "oauth2.googleapis.com"
+  ];
+  if (networkOnlyHosts.some(host => requestUrl.hostname.includes(host))) {
     return;
   }
 
