@@ -291,12 +291,218 @@
   }
 
   // ----------------------------------------------------
+  // 新規語の追加 (AI 抽出機能用)
+  // ----------------------------------------------------
+  // items: [{ word, meaning_ja, phrase_en, phrase_ja, example_en?, example_ja? }]
+  // ctx:   loadWords が返した { headers, headerIndex, rowIndexById }
+  // 戻り値: { appendedIds: ["053","054",...] }
+  async function appendWords(spreadsheetId, items, ctx) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+    if (!Array.isArray(items) || items.length === 0) return { appendedIds: [] };
+    if (!ctx || !ctx.headers || !ctx.headerIndex) throw new Error("ctx is required.");
+
+    // 次の ID = 既存 ID 中の数値最大 + 1。形式は 3 桁ゼロ埋め文字列。
+    let maxId = 0;
+    Object.keys(ctx.rowIndexById || {}).forEach(function (idStr) {
+      const n = parseInt(String(idStr), 10);
+      if (Number.isFinite(n) && n > maxId) maxId = n;
+    });
+
+    function pad3(n) {
+      const s = String(n);
+      return s.length >= 3 ? s : "000".slice(s.length) + s;
+    }
+
+    const headers = ctx.headers;
+    const idx = ctx.headerIndex;
+    const appendedIds = [];
+
+    const rows = items.map(function (it, i) {
+      const nextId = pad3(maxId + 1 + i);
+      appendedIds.push(nextId);
+      const row = new Array(headers.length).fill("");
+      function put(headerName, value) {
+        const c = idx[headerName];
+        if (c != null && c >= 0) row[c] = value;
+      }
+      put("id", nextId);
+      put("word", String(it.word || "").trim().toLowerCase());
+      put("meaning_ja", String(it.meaning_ja || "").trim());
+      put("phrase_en",  String(it.phrase_en  || "").trim());
+      put("phrase_ja",  String(it.phrase_ja  || "").trim());
+      put("example_en", String(it.example_en || "").trim());
+      put("example_ja", String(it.example_ja || "").trim());
+      put("section", "");
+      put("enabled", true);
+      put("correct_count", 0);
+      put("wrong_count", 0);
+      put("last_result", "");
+      put("last_answered_at", "");
+      put("is_weak", false);
+      put("consecutive_correct_count", 0);
+      return row;
+    });
+
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent(SHEET_NAME + "!A:A") +
+      ":append?valueInputOption=RAW&insertDataOption=INSERT_ROWS";
+
+    const res = await authedFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: rows })
+    });
+
+    if (!res.ok) {
+      const errBody = await safeJson(res);
+      const msg = (errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status);
+      throw new Error(msg);
+    }
+    return { appendedIds: appendedIds };
+  }
+
+  // ----------------------------------------------------
+  // diary シートの存在保証 + 既存内容のサマリ
+  // ----------------------------------------------------
+  // 戻り値: { headerIndex: {id, date, script_ja, script_en}, maxId: number, created: bool }
+  async function ensureDiarySheet(spreadsheetId) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+
+    // 1) シート一覧を取得
+    const metaUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "?fields=" + encodeURIComponent("sheets.properties(title,sheetId)");
+
+    const metaRes = await authedFetch(metaUrl, { method: "GET" });
+    if (!metaRes.ok) {
+      const errBody = await safeJson(metaRes);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + metaRes.status));
+    }
+    const meta = await metaRes.json();
+    const sheets = (meta && meta.sheets) || [];
+    const hasDiary = sheets.some(function (s) {
+      return s && s.properties && s.properties.title === "diary";
+    });
+
+    let created = false;
+    if (!hasDiary) {
+      // 2a) 無ければ作成 + ヘッダ行を書き込む
+      const batchUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) + ":batchUpdate";
+      const addRes = await authedFetch(batchUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requests: [{ addSheet: { properties: { title: "diary" } } }]
+        })
+      });
+      if (!addRes.ok) {
+        const errBody = await safeJson(addRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + addRes.status));
+      }
+
+      const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) +
+        "/values/" + encodeURIComponent("diary!A1:D1") +
+        "?valueInputOption=RAW";
+      const headerRes = await authedFetch(headerUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: [["id", "date", "script_ja", "script_en"]] })
+      });
+      if (!headerRes.ok) {
+        const errBody = await safeJson(headerRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + headerRes.status));
+      }
+      created = true;
+    }
+
+    // 3) ヘッダと既存 ID を読む (max を計算)
+    const readUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("diary!A1:D");
+    const readRes = await authedFetch(readUrl, { method: "GET" });
+    if (!readRes.ok) {
+      const errBody = await safeJson(readRes);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + readRes.status));
+    }
+    const readJson = await readRes.json();
+    const values = readJson.values || [];
+
+    let headerIndex = { id: -1, date: -1, script_ja: -1, script_en: -1 };
+    if (values.length > 0) {
+      const headers = values[0].map(function (h) { return String(h).trim(); });
+      headers.forEach(function (h, i) {
+        if (h in headerIndex) headerIndex[h] = i;
+      });
+    }
+    // 既存ヘッダが揃っていなければ補正 (新規作成直後は問題なし)
+    if (headerIndex.id < 0) headerIndex = { id: 0, date: 1, script_ja: 2, script_en: 3 };
+
+    let maxId = 0;
+    for (let r = 1; r < values.length; r++) {
+      const v = values[r][headerIndex.id];
+      const n = parseInt(String(v || "").trim(), 10);
+      if (Number.isFinite(n) && n > maxId) maxId = n;
+    }
+
+    return { headerIndex: headerIndex, maxId: maxId, created: created };
+  }
+
+  // ----------------------------------------------------
+  // diary に 1 行追加
+  // ----------------------------------------------------
+  async function appendDiary(spreadsheetId, diaryCtx, entry) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+    if (!diaryCtx || !diaryCtx.headerIndex) throw new Error("diaryCtx is required.");
+
+    function pad3(n) {
+      const s = String(n);
+      return s.length >= 3 ? s : "000".slice(s.length) + s;
+    }
+    const nextId = pad3((diaryCtx.maxId || 0) + 1);
+
+    // タイムゾーンの曖昧さを避けるため、ローカル日付を YYYY-MM-DD で生成
+    const d = new Date();
+    const yyyy = d.getFullYear();
+    const mm = String(d.getMonth() + 1).padStart(2, "0");
+    const dd = String(d.getDate()).padStart(2, "0");
+    const date = yyyy + "-" + mm + "-" + dd;
+
+    const row = ["", "", "", ""];
+    row[diaryCtx.headerIndex.id]        = nextId;
+    row[diaryCtx.headerIndex.date]      = date;
+    row[diaryCtx.headerIndex.script_ja] = String((entry && entry.script_ja) || "");
+    row[diaryCtx.headerIndex.script_en] = String((entry && entry.script_en) || "");
+
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("diary!A:A") +
+      ":append?valueInputOption=RAW&insertDataOption=INSERT_ROWS";
+
+    const res = await authedFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [row] })
+    });
+    if (!res.ok) {
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+    return { id: nextId, date: date };
+  }
+
+  // ----------------------------------------------------
   // 公開 API
   // ----------------------------------------------------
   window.WQSheets = {
     loadWords: loadWords,
     recordAnswer: recordAnswer,
     writeCells: writeCells,
-    buildAnswerCells: buildAnswerCells
+    buildAnswerCells: buildAnswerCells,
+    appendWords: appendWords,
+    ensureDiarySheet: ensureDiarySheet,
+    appendDiary: appendDiary
   };
 })();

@@ -8,7 +8,9 @@
 (function () {
   "use strict";
 
-  const SCOPES = "https://www.googleapis.com/auth/drive.file";
+  // drive.file: ユーザが Picker で選んだスプレッドシートの読み書き
+  // userinfo.email: GAS AI プロキシ側で 1 ユーザ単位のレート制限キーとして email を使う
+  const SCOPES = "https://www.googleapis.com/auth/drive.file https://www.googleapis.com/auth/userinfo.email";
 
   const authState = {
     tokenClient: null,

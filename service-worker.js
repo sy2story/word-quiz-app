@@ -1,4 +1,4 @@
-const CACHE_NAME = "word-quiz-app-v5";
+const CACHE_NAME = "word-quiz-app-v7";
 
 const STATIC_ASSETS = [
   "./",
@@ -7,6 +7,7 @@ const STATIC_ASSETS = [
   "./app.js",
   "./auth.js",
   "./sheets.js",
+  "./ai.js",
   "./styles.css",
   "./config.js",
   "./manifest.json",

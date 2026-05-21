@@ -118,6 +118,20 @@
         </button>
       </div>
 
+      <!-- AI: 日本語 → 英訳 + 語彙抽出 カード (AI_PROXY_URL が設定済のときだけ表示) -->
+      <div id="ai-card" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold">日本語からAIで単語を追加</p>
+            <p class="text-xs text-slate-500 mt-0.5">日記やメモを貼り付けると、英訳と学習語彙を自動抽出します</p>
+          </div>
+          <button id="ai-open-btn" type="button"
+            class="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">
+            開く
+          </button>
+        </div>
+      </div>
+
       <div id="sections-list" class="space-y-3">
         <!-- セクションカードはJSで挿入 -->
       </div>
@@ -130,7 +144,7 @@
         <span id="quiz-progress" class="text-xs text-slate-500">1 / 10</span>
       </header>
 
-      <article class="bg-white rounded-xl shadow-sm p-5 mb-4">
+      <article id="quiz-card" class="bg-white rounded-xl shadow-sm p-5 mb-4">
         <p class="text-xs text-slate-500 mb-1">意味 / Hint</p>
         <p id="quiz-meaning" class="text-lg font-semibold mb-4">-</p>
 
@@ -208,6 +222,81 @@
 
   </main>
 
+  <!-- AI モーダル -->
+  <div id="ai-modal" class="hidden fixed inset-0 z-50 bg-black/40 flex items-end sm:items-center justify-center p-0 sm:p-4">
+    <div class="bg-white w-full sm:max-w-lg sm:rounded-xl rounded-t-2xl shadow-xl max-h-[92vh] flex flex-col">
+
+      <header class="flex items-center justify-between px-4 py-3 border-b border-slate-200">
+        <h2 class="text-base font-semibold">日本語からAIで単語を追加</h2>
+        <button id="ai-close-btn" type="button" class="text-slate-400 hover:text-slate-600 text-xl leading-none">×</button>
+      </header>
+
+      <div class="overflow-y-auto px-4 py-4 space-y-3 flex-1">
+
+        <div>
+          <label for="ai-input" class="text-xs text-slate-500">日本語の文章 (500文字まで)</label>
+          <textarea id="ai-input" rows="5"
+            class="w-full mt-1 bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none rounded-lg px-3 py-2 text-sm"
+            placeholder="例: 今日は退院日を延期することになった。腫れがまだ引いていないので、医師に処方箋を書いてもらった。"></textarea>
+          <div class="flex items-center justify-between mt-1">
+            <p id="ai-input-msg" class="text-xs text-red-600 hidden">-</p>
+            <p id="ai-input-count" class="text-xs text-slate-400 ml-auto">0 / 500</p>
+          </div>
+        </div>
+
+        <button id="ai-generate-btn" type="button"
+          class="w-full bg-blue-600 hover:bg-blue-700 disabled:opacity-40 disabled:cursor-not-allowed text-white text-sm font-semibold py-2.5 rounded-lg"
+          disabled>
+          生成
+        </button>
+
+        <div id="ai-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs rounded-md p-2"></div>
+
+        <!-- 結果 -->
+        <div id="ai-result" class="hidden space-y-3 pt-2">
+
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-slate-500">英訳</p>
+            <div class="flex items-center gap-2">
+              <p id="ai-remaining" class="text-xs text-slate-400">今日 残り - 回</p>
+              <button id="ai-speak-btn" type="button"
+                class="text-xs bg-white border border-blue-200 text-blue-600 px-2 py-1 rounded hover:bg-blue-50"
+                title="英訳を読み上げ">
+                🔊 読み上げ
+              </button>
+            </div>
+          </div>
+          <p id="ai-translation" class="text-sm bg-slate-50 border border-slate-200 rounded-md p-2 leading-relaxed">-</p>
+
+          <div class="flex items-center justify-between">
+            <p class="text-xs text-slate-500">抽出された語彙 (チェックしたものだけ単語シートに追加されます)</p>
+            <button id="ai-toggle-all-btn" type="button" class="text-xs text-blue-600 hover:underline">全て選択</button>
+          </div>
+          <ul id="ai-items" class="space-y-2"></ul>
+        </div>
+
+      </div>
+
+      <footer id="ai-footer" class="hidden border-t border-slate-200 px-4 py-3 space-y-2">
+        <button id="ai-regenerate-btn" type="button"
+          class="w-full bg-white border border-blue-200 text-blue-600 disabled:opacity-40 disabled:cursor-not-allowed text-sm font-medium py-2 rounded-lg">
+          再生成 <span id="ai-regen-hint" class="text-xs text-slate-500"></span>
+        </button>
+        <div class="grid grid-cols-2 gap-2">
+          <button id="ai-cancel-btn" type="button"
+            class="bg-white border border-slate-300 text-slate-600 text-sm font-medium py-2 rounded-lg">
+            キャンセル
+          </button>
+          <button id="ai-confirm-btn" type="button"
+            class="bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold py-2 rounded-lg">
+            確定
+          </button>
+        </div>
+      </footer>
+
+    </div>
+  </div>
+
   <footer class="max-w-md mx-auto px-4 pb-8 pt-4 text-center text-xs text-slate-400">
     <a href="./privacy.html" class="hover:text-blue-600 hover:underline">プライバシーポリシー</a>
     <span class="mx-2">·</span>
@@ -219,6 +308,7 @@
   <script src="./config.local.js" onerror="this.remove()"></script>
   <script src="./auth.js" defer></script>
   <script src="./sheets.js" defer></script>
+  <script src="./ai.js" defer></script>
   <script src="./app.js" defer></script>
   <script>
     if ("serviceWorker" in navigator) {

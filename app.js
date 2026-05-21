@@ -388,6 +388,7 @@
     document.getElementById("home-screen").hidden = true;
     document.getElementById("quiz-screen").hidden = false;
     document.getElementById("quiz-summary").classList.add("hidden");
+    document.getElementById("quiz-card").classList.remove("hidden");
     renderQuiz();
   }
 
@@ -510,8 +511,8 @@
   }
 
   function finishQuiz() {
-    document.getElementById("reveal-area").classList.add("hidden");
     document.getElementById("answer-area").classList.add("hidden");
+    document.getElementById("quiz-card").classList.add("hidden");
 
     const remainingWeak = state.quiz.words.filter(isWordWeak).length;
     const text = remainingWeak === 0
@@ -627,6 +628,251 @@
   }
 
   // ====================================================
+  // AI: 日本語 → 英訳 + 語彙抽出 + シート追加
+  // ====================================================
+  const ai = {
+    open: false,
+    lastInputText: "",      // 最後に「生成」or「再生成」したテキスト
+    regenCountForText: 0,   // 同一 lastInputText に対する再生成回数 (上限 2 = (F))
+    items: [],              // [{...item, _selected: bool}]
+    translation_en: "",
+    cooldownTimer: null,
+    writing: false
+  };
+  const AI_MAX_REGEN_PER_TEXT = 2;
+
+  function showAiCardIfReady() {
+    const card = document.getElementById("ai-card");
+    if (!card) return;
+    const ready = window.WQAi && window.WQAi.isEnabled() &&
+      state.signedIn && state.spreadsheetId && !state.loadError;
+    if (ready) card.classList.remove("hidden");
+    else card.classList.add("hidden");
+  }
+
+  function aiSetError(msg) {
+    const el = document.getElementById("ai-error");
+    if (!el) return;
+    if (msg) {
+      el.textContent = msg;
+      el.classList.remove("hidden");
+    } else {
+      el.textContent = "";
+      el.classList.add("hidden");
+    }
+  }
+
+  function aiUpdateRemaining() {
+    const el = document.getElementById("ai-remaining");
+    if (!el) return;
+    const r = window.WQAi.getRemaining();
+    el.textContent = (r == null) ? "今日 残り - 回" : ("今日 残り " + r + " 回");
+  }
+
+  function aiUpdateInputCount() {
+    const input = document.getElementById("ai-input");
+    const count = document.getElementById("ai-input-count");
+    const btn = document.getElementById("ai-generate-btn");
+    const msg = document.getElementById("ai-input-msg");
+    const max = (window.WQAi && window.WQAi.MAX_INPUT_CHARS) || 500;
+    const len = input.value.length;
+    count.textContent = len + " / " + max;
+    count.classList.toggle("text-red-500", len > max);
+    count.classList.toggle("text-slate-400", len <= max);
+    if (len > max) {
+      msg.textContent = "文字数が上限を超えています。";
+      msg.classList.remove("hidden");
+    } else {
+      msg.classList.add("hidden");
+    }
+    btn.disabled = !(len > 0 && len <= max) || ai.writing;
+  }
+
+  function aiStartCooldownTick() {
+    aiTickCooldown();
+    if (ai.cooldownTimer) clearInterval(ai.cooldownTimer);
+    ai.cooldownTimer = setInterval(aiTickCooldown, 500);
+  }
+
+  function aiStopCooldownTick() {
+    if (ai.cooldownTimer) {
+      clearInterval(ai.cooldownTimer);
+      ai.cooldownTimer = null;
+    }
+  }
+
+  function aiTickCooldown() {
+    const btn = document.getElementById("ai-regenerate-btn");
+    const hint = document.getElementById("ai-regen-hint");
+    if (!btn || !hint) return;
+
+    if (ai.regenCountForText >= AI_MAX_REGEN_PER_TEXT) {
+      // (F): 同一テキストでの再生成回数上限。ボタン非表示にして文言で案内。
+      btn.classList.add("hidden");
+      aiStopCooldownTick();
+      return;
+    }
+    btn.classList.remove("hidden");
+
+    const cdRemain = window.WQAi.getCooldownRemainingSec();
+    const regenLeft = AI_MAX_REGEN_PER_TEXT - ai.regenCountForText;
+    if (cdRemain > 0) {
+      btn.disabled = true;
+      hint.textContent = "(" + cdRemain + "秒)";
+    } else {
+      btn.disabled = ai.writing;
+      hint.textContent = "(残り " + regenLeft + " 回)";
+      aiStopCooldownTick();
+    }
+  }
+
+  function openAiModal() {
+    if (!window.WQAi || !window.WQAi.isEnabled()) {
+      showError("AI 機能の URL (AI_PROXY_URL) が設定されていません。");
+      return;
+    }
+    ai.open = true;
+    ai.lastInputText = "";
+    ai.regenCountForText = 0;
+    ai.items = [];
+    ai.translation_en = "";
+    document.getElementById("ai-input").value = "";
+    document.getElementById("ai-result").classList.add("hidden");
+    document.getElementById("ai-footer").classList.add("hidden");
+    aiSetError("");
+    aiUpdateInputCount();
+    aiUpdateRemaining();
+    document.getElementById("ai-modal").classList.remove("hidden");
+    setTimeout(() => document.getElementById("ai-input").focus(), 50);
+  }
+
+  function closeAiModal() {
+    ai.open = false;
+    aiStopCooldownTick();
+    document.getElementById("ai-modal").classList.add("hidden");
+  }
+
+  function aiRenderResult() {
+    document.getElementById("ai-translation").textContent = ai.translation_en || "(英訳なし)";
+    const ul = document.getElementById("ai-items");
+    ul.innerHTML = "";
+    ai.items.forEach((it, idx) => {
+      const li = document.createElement("li");
+      li.className = "border border-slate-200 rounded-md p-2";
+      li.innerHTML =
+        '<label class="flex items-start gap-2 cursor-pointer">' +
+          '<input type="checkbox" data-idx="' + idx + '" class="ai-item-check mt-1" ' +
+            (it._selected ? "checked" : "") + '>' +
+          '<div class="min-w-0 flex-1">' +
+            '<p class="text-sm font-semibold">' + escapeHtml(it.word) +
+              ' <span class="text-xs text-slate-500 font-normal">— ' + escapeHtml(it.meaning_ja) + '</span></p>' +
+            '<p class="text-xs text-slate-600 mt-0.5">' + escapeHtml(it.phrase_en) +
+              ' <span class="text-slate-400">/ ' + escapeHtml(it.phrase_ja) + '</span></p>' +
+            (it.example_en
+              ? '<p class="text-xs text-slate-500 mt-0.5 italic">例: ' + escapeHtml(it.example_en) + '</p>'
+              : "") +
+          '</div>' +
+        '</label>';
+      ul.appendChild(li);
+    });
+
+    // チェック変更ハンドラ
+    ul.querySelectorAll(".ai-item-check").forEach(cb => {
+      cb.addEventListener("change", e => {
+        const i = parseInt(e.target.dataset.idx, 10);
+        if (!Number.isFinite(i)) return;
+        ai.items[i]._selected = e.target.checked;
+      });
+    });
+
+    document.getElementById("ai-result").classList.remove("hidden");
+    document.getElementById("ai-footer").classList.remove("hidden");
+    aiUpdateRemaining();
+    aiTickCooldown();
+    aiStartCooldownTick();
+  }
+
+  async function aiCallGenerate(isRegenerate) {
+    const input = document.getElementById("ai-input");
+    const text = input.value;
+    if (!text.trim()) return;
+
+    // 新規生成 or テキストが変わった再生成 → カウンタリセット
+    if (!isRegenerate || text !== ai.lastInputText) {
+      ai.regenCountForText = 0;
+    }
+
+    ai.writing = true;
+    aiSetError("");
+    document.getElementById("ai-generate-btn").disabled = true;
+    document.getElementById("ai-regenerate-btn").disabled = true;
+
+    const result = await window.WQAi.generate(text);
+
+    ai.writing = false;
+    aiUpdateInputCount();
+
+    if (!result.success) {
+      aiSetError(result.error || "失敗しました");
+      aiUpdateRemaining();
+      // クールダウン中エラーでも UI を進める
+      if (ai.items.length > 0) aiTickCooldown();
+      return;
+    }
+
+    // 成功 → 状態更新
+    ai.lastInputText = text;
+    if (isRegenerate) ai.regenCountForText += 1;
+    ai.translation_en = result.translation_en || "";
+    ai.items = (result.items || []).map(it => Object.assign({}, it, { _selected: true }));
+    aiRenderResult();
+  }
+
+  async function aiConfirm() {
+    if (ai.writing) return;
+    if (!state.spreadsheetId || !state.sheetCtx) {
+      aiSetError("スプレッドシートが読み込まれていません。");
+      return;
+    }
+    const selected = ai.items.filter(it => it._selected);
+    const scriptJa = ai.lastInputText;
+    const scriptEn = ai.translation_en;
+
+    ai.writing = true;
+    aiSetError("");
+    document.getElementById("ai-confirm-btn").disabled = true;
+    document.getElementById("ai-cancel-btn").disabled = true;
+    document.getElementById("ai-regenerate-btn").disabled = true;
+
+    try {
+      // diary を先に保証してから 2 つの append を順に。
+      const diaryCtx = await window.WQSheets.ensureDiarySheet(state.spreadsheetId);
+      await window.WQSheets.appendDiary(state.spreadsheetId, diaryCtx, {
+        script_ja: scriptJa, script_en: scriptEn
+      });
+      if (selected.length > 0) {
+        await window.WQSheets.appendWords(state.spreadsheetId, selected, state.sheetCtx);
+      }
+      closeAiModal();
+      await refresh();
+      showError(
+        selected.length > 0
+          ? selected.length + " 件の単語を追加しました。"
+          : "日記を記録しました (単語は選択されませんでした)。",
+        "info"
+      );
+    } catch (err) {
+      console.error("ai confirm failed:", err);
+      aiSetError("書き込みに失敗しました: " + (err.message || err));
+    } finally {
+      ai.writing = false;
+      document.getElementById("ai-confirm-btn").disabled = false;
+      document.getElementById("ai-cancel-btn").disabled = false;
+      aiTickCooldown();
+    }
+  }
+
+  // ====================================================
   // 接続状態 UI
   // ====================================================
   function updateConnectionUi() {
@@ -679,10 +925,12 @@
       document.getElementById("sheet-error-message").textContent = state.loadError.message;
       sectionsList.innerHTML = "";
       document.getElementById("last-updated").textContent = "シート読み込みエラー";
+      showAiCardIfReady();
       return;
     }
 
     show(statsPanel);
+    showAiCardIfReady();
   }
 
   async function handleSignIn() {
@@ -810,6 +1058,40 @@
     });
     document.getElementById("quiz-back-btn").addEventListener("click", backToHome);
     document.getElementById("summary-back-btn").addEventListener("click", backToHome);
+
+    // AI モーダル関連
+    const aiOpenBtn = document.getElementById("ai-open-btn");
+    if (aiOpenBtn) aiOpenBtn.addEventListener("click", openAiModal);
+    const aiCloseBtn = document.getElementById("ai-close-btn");
+    if (aiCloseBtn) aiCloseBtn.addEventListener("click", closeAiModal);
+    const aiCancelBtn = document.getElementById("ai-cancel-btn");
+    if (aiCancelBtn) aiCancelBtn.addEventListener("click", closeAiModal);
+    const aiInputEl = document.getElementById("ai-input");
+    if (aiInputEl) aiInputEl.addEventListener("input", aiUpdateInputCount);
+    const aiGenerateBtn = document.getElementById("ai-generate-btn");
+    if (aiGenerateBtn) aiGenerateBtn.addEventListener("click", () => aiCallGenerate(false));
+    const aiRegenBtn = document.getElementById("ai-regenerate-btn");
+    if (aiRegenBtn) aiRegenBtn.addEventListener("click", () => aiCallGenerate(true));
+    const aiConfirmBtn = document.getElementById("ai-confirm-btn");
+    if (aiConfirmBtn) aiConfirmBtn.addEventListener("click", aiConfirm);
+    const aiToggleAllBtn = document.getElementById("ai-toggle-all-btn");
+    if (aiToggleAllBtn) aiToggleAllBtn.addEventListener("click", () => {
+      const anyUnchecked = ai.items.some(it => !it._selected);
+      ai.items.forEach(it => { it._selected = anyUnchecked; });
+      aiRenderResult();
+      aiToggleAllBtn.textContent = anyUnchecked ? "全て解除" : "全て選択";
+    });
+    const aiSpeakBtn = document.getElementById("ai-speak-btn");
+    if (aiSpeakBtn) aiSpeakBtn.addEventListener("click", () => {
+      const text = (ai.translation_en || "").trim();
+      if (!text) return;
+      speak(text);
+    });
+    // モーダル背景クリックで閉じる
+    const aiModal = document.getElementById("ai-modal");
+    if (aiModal) aiModal.addEventListener("click", (e) => {
+      if (e.target === aiModal) closeAiModal();
+    });
 
     // 初期 UI
     updateConnectionUi();
