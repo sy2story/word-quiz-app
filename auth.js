@@ -144,12 +144,32 @@
     return m ? m[1] : "";
   }
 
+  function resolveApiKey() {
+    const isProd = location.hostname.endsWith("github.io");
+    if (isProd) {
+      const prod = window.GOOGLE_API_KEY_PROD;
+      if (prod && !prod.startsWith("PASTE_")) return prod;
+      // 本番フォールバック（PROD が未設定なら dev を試す）
+      return window.GOOGLE_API_KEY;
+    }
+    // ローカル開発: 通常 config.local.js から注入される
+    const dev = window.GOOGLE_API_KEY;
+    if (!dev) {
+      console.warn(
+        "[auth] GOOGLE_API_KEY が未設定です。" +
+        "ローカル開発用 API キーを config.local.js に設定してください " +
+        "（テンプレ: config.local.sample.js）。"
+      );
+    }
+    return dev;
+  }
+
   function pickSpreadsheet() {
     return Promise.all([getAccessToken(), loadPicker()]).then(([token]) => {
       return new Promise((resolve, reject) => {
-        const apiKey = window.GOOGLE_API_KEY;
+        const apiKey = resolveApiKey();
         if (!apiKey || apiKey.startsWith("PASTE_")) {
-          return reject(new Error("GOOGLE_API_KEY is not configured."));
+          return reject(new Error("API key is not configured for this environment."));
         }
 
         const view = new google.picker.View(google.picker.ViewId.SPREADSHEETS);

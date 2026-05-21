@@ -1,0 +1,137 @@
+<!doctype html>
+<html lang="ja">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1, viewport-fit=cover">
+  <title>プライバシーポリシー — 英単語クイズ</title>
+  <meta name="theme-color" content="#2563eb">
+  <script src="https://cdn.tailwindcss.com"></script>
+  <link rel="stylesheet" href="./styles.css">
+</head>
+<body class="bg-blue-50 text-slate-800 min-h-screen">
+  <main class="max-w-2xl mx-auto px-4 py-8">
+
+    <header class="mb-6">
+      <a href="./index.html" class="text-sm text-blue-600 hover:underline">← アプリに戻る</a>
+      <h1 class="text-2xl font-bold text-blue-600 mt-2">プライバシーポリシー</h1>
+      <p class="text-xs text-slate-500 mt-1">最終更新: 2026-05-20</p>
+    </header>
+
+    <article class="bg-white rounded-xl shadow-sm p-6 space-y-6 text-sm leading-relaxed">
+
+      <section>
+        <p>
+          「英単語クイズ」（以下「本アプリ」）は、Google スプレッドシートを単語帳として使う
+          学習用 Web アプリケーションです。本アプリの提供にあたって、運営者がユーザーから
+          取得・保管する情報はありません。本ポリシーは、その仕組みと前提を明示するものです。
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">1. 取得・保管する個人情報</h2>
+        <p>
+          運営者側のサーバーは存在しません。本アプリは静的な HTML / JavaScript として配信され、
+          すべての通信はユーザーのブラウザと Google API の間で直接行われます。
+          運営者がユーザーの個人情報・学習履歴・スプレッドシートの内容を
+          収集・閲覧・保管することは <strong>一切ありません</strong>。
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">2. 使用する Google アカウントの権限</h2>
+        <p>
+          本アプリは、Google が提供する OAuth 認可の仕組みに基づき、以下のスコープを要求します。
+        </p>
+        <div class="bg-slate-50 border border-slate-200 rounded p-3 mt-2 text-xs font-mono break-all">
+          https://www.googleapis.com/auth/drive.file
+        </div>
+        <p class="mt-2">
+          このスコープは <strong>「アプリで開いたファイル、またはアプリで作成したファイルのみ」</strong>
+          にアクセスを許可するものです。具体的には、ユーザーが Google ピッカー画面で
+          自ら選択した1つのスプレッドシートだけが本アプリの読み書き対象となります。
+          ユーザーが選択していない他の Google ドライブのファイルには、本アプリは
+          一切アクセスできません。
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">3. スプレッドシートに書き込む情報</h2>
+        <p>
+          ユーザーが選択したスプレッドシートに対し、本アプリは以下の列を更新します。
+        </p>
+        <ul class="list-disc list-inside mt-2 space-y-1">
+          <li><code class="bg-slate-100 px-1 rounded text-xs">correct_count</code> / <code class="bg-slate-100 px-1 rounded text-xs">wrong_count</code>: 正答数・誤答数</li>
+          <li><code class="bg-slate-100 px-1 rounded text-xs">last_result</code> / <code class="bg-slate-100 px-1 rounded text-xs">last_answered_at</code>: 最終結果と回答時刻</li>
+          <li><code class="bg-slate-100 px-1 rounded text-xs">is_weak</code> / <code class="bg-slate-100 px-1 rounded text-xs">consecutive_correct_count</code>: 苦手判定と連続正解数</li>
+        </ul>
+        <p class="mt-2">
+          これらはすべてユーザー自身の Google アカウント配下のスプレッドシートに直接書き込まれ、
+          運営者やその他の第三者が参照することはできません。
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">4. ブラウザに保存する情報（localStorage）</h2>
+        <p>
+          本アプリは、利便性のために以下の情報をユーザーの端末（ブラウザの localStorage）に保存します。
+          これらは端末内に保存されるのみで、外部に送信されることはありません。
+        </p>
+        <ul class="list-disc list-inside mt-2 space-y-1">
+          <li>接続中スプレッドシートの ID / 名前 / URL</li>
+          <li>苦手単語の ID 一覧、着手済みセクションの記録</li>
+          <li>直近の単語データのキャッシュ（オフライン表示用）</li>
+          <li>送信に失敗した解答結果の再送キュー</li>
+        </ul>
+        <p class="mt-2">
+          ブラウザの設定でサイトデータを削除すると、これらの情報も削除されます。
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">5. 第三者提供・解析ツール</h2>
+        <p>
+          本アプリは、アクセス解析・広告配信・行動トラッキングなどの第三者サービスを
+          一切使用していません。Cookie も使用していません。
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">6. アクセス権の取り消し</h2>
+        <p>
+          本アプリへのアクセス権限は、ユーザーがいつでも取り消すことができます。
+          <a href="https://myaccount.google.com/permissions" target="_blank" rel="noopener noreferrer"
+             class="text-blue-600 hover:underline">Google アカウントの「サードパーティアプリとサービス」設定</a>
+          から本アプリを削除すると、以降のアクセスは即座に無効化されます。
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">7. お問い合わせ</h2>
+        <p>
+          本ポリシーや本アプリに関するお問い合わせは、以下の GitHub Issues よりお願いします。
+        </p>
+        <p class="mt-2">
+          <a href="https://github.com/sy2story/word-quiz-app/issues" target="_blank" rel="noopener noreferrer"
+             class="text-blue-600 hover:underline break-all">
+            https://github.com/sy2story/word-quiz-app/issues
+          </a>
+        </p>
+      </section>
+
+      <section>
+        <h2 class="text-base font-semibold text-slate-900 mb-2">8. 改定について</h2>
+        <p>
+          本ポリシーの内容は予告なく変更されることがあります。重要な変更がある場合は、
+          本ページ上で通知します。
+        </p>
+      </section>
+
+    </article>
+
+    <footer class="text-center text-xs text-slate-400 mt-8">
+      <a href="./index.html" class="hover:underline">英単語クイズに戻る</a>
+    </footer>
+
+  </main>
+</body>
+</html>
