@@ -456,6 +456,40 @@
   }
 
   // ----------------------------------------------------
+  // 新規スプレッドシート作成
+  // ----------------------------------------------------
+  // - Sheets API で新しいスプレッドシートを作成し、最初のタブを "words" にする
+  // - 続けて ensureWordsSheet を呼び、ヘッダ 15 列を書き込む
+  // - drive.file スコープでもアプリ作成ファイルはアクセス可
+  // 戻り値: { id, name, url }
+  async function createSpreadsheet(name) {
+    const title = String(name || "").trim() || "英単語クイズ";
+    const url = "https://sheets.googleapis.com/v4/spreadsheets";
+    const res = await authedFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({
+        properties: { title: title },
+        sheets: [{ properties: { title: SHEET_NAME } }]
+      })
+    });
+    if (!res.ok) {
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+    const meta = await res.json();
+    const id = meta.spreadsheetId;
+    const sheetUrl = meta.spreadsheetUrl ||
+      ("https://docs.google.com/spreadsheets/d/" + encodeURIComponent(id) + "/edit");
+    const resolvedName = (meta.properties && meta.properties.title) || title;
+
+    // ヘッダを書き込む (words タブは作成済みなので addSheet はスキップされる)
+    await ensureWordsSheet(id);
+
+    return { id: id, name: resolvedName, url: sheetUrl };
+  }
+
+  // ----------------------------------------------------
   // diary シートの存在保証 + 既存内容のサマリ
   // ----------------------------------------------------
   // 戻り値: { headerIndex: {id, date, script_ja, script_en}, maxId: number, created: bool }
@@ -818,6 +852,7 @@
     buildAnswerCells: buildAnswerCells,
     appendWords: appendWords,
     ensureWordsSheet: ensureWordsSheet,
+    createSpreadsheet: createSpreadsheet,
     ensureDiarySheet: ensureDiarySheet,
     appendDiary: appendDiary,
     ensureSentenceSheet: ensureSentenceSheet,

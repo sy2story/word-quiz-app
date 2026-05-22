@@ -1296,6 +1296,32 @@
     }
   }
 
+  async function handleCreateSheet() {
+    const btn = document.getElementById("create-sheet-btn");
+    if (btn && btn.disabled) return;
+    try {
+      if (btn) btn.disabled = true;
+      const today = new Date().toISOString().slice(0, 10);
+      const name = "英単語クイズ " + today;
+      const file = await window.WQSheets.createSpreadsheet(name);
+      state.spreadsheetId = file.id;
+      state.spreadsheetName = file.name || name;
+      state.spreadsheetUrl = file.url || "";
+      state.loadError = null;
+      state.autoCreateDeclinedFor = null;
+      lsSet(STORAGE_KEYS.spreadsheetId, state.spreadsheetId);
+      lsSet(STORAGE_KEYS.spreadsheetName, state.spreadsheetName);
+      lsSet(STORAGE_KEYS.spreadsheetUrl, state.spreadsheetUrl);
+      showError("新しいスプレッドシートを作成しました: " + state.spreadsheetName, "info");
+      await refresh();
+    } catch (err) {
+      console.error("createSheet failed:", err);
+      showError("スプレッドシートの作成に失敗しました: " + (err.message || err));
+    } finally {
+      if (btn) btn.disabled = false;
+    }
+  }
+
   async function handleSignOut() {
     try { await window.WQAuth.signOut(); } catch (e) { /* ignore */ }
     state.signedIn = false;
@@ -1355,6 +1381,7 @@
     // 接続関連ボタン
     document.getElementById("signin-btn").addEventListener("click", handleSignIn);
     document.getElementById("pick-btn").addEventListener("click", handlePickSheet);
+    document.getElementById("create-sheet-btn").addEventListener("click", handleCreateSheet);
     document.getElementById("change-sheet-btn").addEventListener("click", handlePickSheet);
     document.getElementById("signout-btn").addEventListener("click", handleSignOut);
     document.getElementById("signout-btn-early").addEventListener("click", handleSignOut);
