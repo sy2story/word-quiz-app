@@ -363,6 +363,96 @@
   }
 
   // ----------------------------------------------------
+  // words シートの存在保証 + ヘッダ書き込み
+  // ----------------------------------------------------
+  // - words タブが無ければ addSheet で作成
+  // - A1 が空ならヘッダ 15 列を書き込み
+  // - 既にヘッダがある場合は何もしない（既存データは触らない）
+  // 戻り値: { created: bool, headerWritten: bool }
+  async function ensureWordsSheet(spreadsheetId) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+
+    const WORDS_HEADERS = [
+      "id", "word", "meaning_ja", "phrase_en", "phrase_ja",
+      "example_en", "example_ja", "section", "enabled",
+      "correct_count", "wrong_count", "last_result", "last_answered_at",
+      "is_weak", "consecutive_correct_count"
+    ];
+
+    // 1) シート一覧を取得
+    const metaUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "?fields=" + encodeURIComponent("sheets.properties(title,sheetId)");
+
+    const metaRes = await authedFetch(metaUrl, { method: "GET" });
+    if (!metaRes.ok) {
+      const errBody = await safeJson(metaRes);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + metaRes.status));
+    }
+    const meta = await metaRes.json();
+    const sheets = (meta && meta.sheets) || [];
+    const hasWords = sheets.some(function (s) {
+      return s && s.properties && s.properties.title === SHEET_NAME;
+    });
+
+    let created = false;
+    if (!hasWords) {
+      const batchUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) + ":batchUpdate";
+      const addRes = await authedFetch(batchUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requests: [{ addSheet: { properties: { title: SHEET_NAME } } }]
+        })
+      });
+      if (!addRes.ok) {
+        const errBody = await safeJson(addRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + addRes.status));
+      }
+      created = true;
+    }
+
+    // 2) ヘッダの有無を確認（既存データを上書きしないため）
+    let headerEmpty = created;  // 新規作成時は当然空
+    if (!created) {
+      const checkUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) +
+        "/values/" + encodeURIComponent(SHEET_NAME + "!A1:O1");
+      const checkRes = await authedFetch(checkUrl, { method: "GET" });
+      if (!checkRes.ok) {
+        const errBody = await safeJson(checkRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + checkRes.status));
+      }
+      const checkJson = await checkRes.json();
+      const vals = checkJson.values || [];
+      // 1行目が無い or 1行目が完全に空ならヘッダ書き込み対象
+      headerEmpty = vals.length === 0 ||
+        !vals[0].some(function (c) { return String(c == null ? "" : c).trim() !== ""; });
+    }
+
+    let headerWritten = false;
+    if (headerEmpty) {
+      const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) +
+        "/values/" + encodeURIComponent(SHEET_NAME + "!A1:O1") +
+        "?valueInputOption=RAW";
+      const headerRes = await authedFetch(headerUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: [WORDS_HEADERS] })
+      });
+      if (!headerRes.ok) {
+        const errBody = await safeJson(headerRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + headerRes.status));
+      }
+      headerWritten = true;
+    }
+
+    return { created: created, headerWritten: headerWritten };
+  }
+
+  // ----------------------------------------------------
   // diary シートの存在保証 + 既存内容のサマリ
   // ----------------------------------------------------
   // 戻り値: { headerIndex: {id, date, script_ja, script_en}, maxId: number, created: bool }
@@ -502,6 +592,7 @@
     writeCells: writeCells,
     buildAnswerCells: buildAnswerCells,
     appendWords: appendWords,
+    ensureWordsSheet: ensureWordsSheet,
     ensureDiarySheet: ensureDiarySheet,
     appendDiary: appendDiary
   };

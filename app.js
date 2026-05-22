@@ -33,7 +33,8 @@
     spreadsheetUrl: "",
     sheetCtx: null,    // { headers, headerIndex, rowIndexById }
     signedIn: false,
-    loadError: null    // { message, kind: "structure" | "network" | "auth" | "other" }
+    loadError: null,   // { message, kind: "structure" | "network" | "auth" | "other" }
+    autoCreateDeclinedFor: null  // 同一シートで自動作成 confirm を拒否されたら再プロンプトしない
   };
 
   // ====================================================
@@ -143,6 +144,35 @@
 
       return { data: result.data, updatedAt: result.updatedAt, source: "api" };
     } catch (err) {
+      // 自動作成オファー: words タブ欠落 or 完全に空のときだけ
+      const autoCreatable = err && (err.code === "TAB_NOT_FOUND" || err.code === "EMPTY_SHEET");
+      if (autoCreatable && state.autoCreateDeclinedFor !== state.spreadsheetId) {
+        const msg = err.code === "TAB_NOT_FOUND"
+          ? "'words' シートが見つかりません。ヘッダ付きで自動作成しますか？"
+          : "'words' シートが空です。ヘッダ行を自動で書き込みますか？";
+        if (window.confirm(msg)) {
+          try {
+            await window.WQSheets.ensureWordsSheet(state.spreadsheetId);
+            const result = await window.WQSheets.loadWords(state.spreadsheetId);
+            state.sheetCtx = {
+              headers: result.headers,
+              headerIndex: result.headerIndex,
+              rowIndexById: result.rowIndexById
+            };
+            state.loadError = null;
+            lsSet(STORAGE_KEYS.cachedWords, result.data);
+            lsSet(STORAGE_KEYS.cachedWordsUpdatedAt, result.updatedAt);
+            showError("words シートを作成しました。単語を追加すると学習を開始できます。", "info");
+            return { data: result.data, updatedAt: result.updatedAt, source: "api" };
+          } catch (e2) {
+            console.warn("ensureWordsSheet failed:", e2);
+            err = e2;  // 既存エラー処理にフォールスルー
+          }
+        } else {
+          state.autoCreateDeclinedFor = state.spreadsheetId;
+        }
+      }
+
       console.warn("Sheets API fetch failed:", err);
       state.loadError = classifyLoadError(err);
 
@@ -965,6 +995,7 @@
       state.spreadsheetName = file.name || "";
       state.spreadsheetUrl = file.url || "";
       state.loadError = null;
+      state.autoCreateDeclinedFor = null;
       lsSet(STORAGE_KEYS.spreadsheetId, state.spreadsheetId);
       lsSet(STORAGE_KEYS.spreadsheetName, state.spreadsheetName);
       lsSet(STORAGE_KEYS.spreadsheetUrl, state.spreadsheetUrl);
@@ -985,6 +1016,7 @@
     state.words = [];
     state.sections = [];
     state.loadError = null;
+    state.autoCreateDeclinedFor = null;
     lsSet(STORAGE_KEYS.spreadsheetId, "");
     lsSet(STORAGE_KEYS.spreadsheetName, "");
     lsSet(STORAGE_KEYS.spreadsheetUrl, "");
