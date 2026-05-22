@@ -35,6 +35,12 @@
     return Number.isFinite(n) ? n : 0;
   }
 
+  // id は数値で統一。既存の "001" のようなゼロ埋め文字列も parseInt で 1 に正規化する。
+  function toIntId(v) {
+    const n = parseInt(String(v == null ? "" : v).trim(), 10);
+    return Number.isFinite(n) ? n : NaN;
+  }
+
   function toBoolean(v) {
     if (v === true) return true;
     if (v === false) return false;
@@ -136,8 +142,10 @@
       if (!raw.id || !raw.word || !raw.meaning_ja || !raw.phrase_en || !raw.phrase_ja) continue;
 
       const item = normalizeRow(raw);
+      if (!Number.isFinite(item.id)) continue;
       data.push(item);
       // シート上の行番号は 1始まり、ヘッダが1行目なので r+1
+      // item.id は number。Object キーは内部で文字列化されるので、後段の rowIndexById[word.id] アクセスでも一致する
       rowIndexById[item.id] = r + 1;
     }
 
@@ -152,7 +160,7 @@
 
   function normalizeRow(raw) {
     return {
-      id: String(raw.id).trim(),
+      id: toIntId(raw.id),
       word: String(raw.word).trim().toLowerCase(),
       meaningJa: String(raw.meaning_ja).trim(),
       phraseEn: String(raw.phrase_en).trim(),
@@ -301,24 +309,19 @@
     if (!Array.isArray(items) || items.length === 0) return { appendedIds: [] };
     if (!ctx || !ctx.headers || !ctx.headerIndex) throw new Error("ctx is required.");
 
-    // 次の ID = 既存 ID 中の数値最大 + 1。形式は 3 桁ゼロ埋め文字列。
+    // 次の ID = 既存 ID 中の数値最大 + 1。number で採番・書き込み。
     let maxId = 0;
     Object.keys(ctx.rowIndexById || {}).forEach(function (idStr) {
       const n = parseInt(String(idStr), 10);
       if (Number.isFinite(n) && n > maxId) maxId = n;
     });
 
-    function pad3(n) {
-      const s = String(n);
-      return s.length >= 3 ? s : "000".slice(s.length) + s;
-    }
-
     const headers = ctx.headers;
     const idx = ctx.headerIndex;
     const appendedIds = [];
 
     const rows = items.map(function (it, i) {
-      const nextId = pad3(maxId + 1 + i);
+      const nextId = maxId + 1 + i;
       appendedIds.push(nextId);
       const row = new Array(headers.length).fill("");
       function put(headerName, value) {
@@ -547,11 +550,7 @@
     if (!spreadsheetId) throw new Error("spreadsheetId is required.");
     if (!diaryCtx || !diaryCtx.headerIndex) throw new Error("diaryCtx is required.");
 
-    function pad3(n) {
-      const s = String(n);
-      return s.length >= 3 ? s : "000".slice(s.length) + s;
-    }
-    const nextId = pad3((diaryCtx.maxId || 0) + 1);
+    const nextId = (diaryCtx.maxId || 0) + 1;
 
     // タイムゾーンの曖昧さを避けるため、ローカル日付を YYYY-MM-DD で生成
     const d = new Date();

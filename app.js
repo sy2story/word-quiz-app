@@ -70,26 +70,64 @@
     }
   }
 
+  // id は number で統一。旧バージョンで "001" 文字列配列が保存されている場合も parseInt で number 化して返す。
+  function normalizeIdList(arr) {
+    if (!Array.isArray(arr)) return [];
+    const seen = new Set();
+    const out = [];
+    arr.forEach(function (v) {
+      const n = parseInt(String(v), 10);
+      if (Number.isFinite(n) && !seen.has(n)) {
+        seen.add(n);
+        out.push(n);
+      }
+    });
+    return out;
+  }
+
   function getWeakIds() {
-    const arr = lsGet(STORAGE_KEYS.weakIds, []);
-    return Array.isArray(arr) ? arr : [];
+    return normalizeIdList(lsGet(STORAGE_KEYS.weakIds, []));
   }
 
   function setWeakIds(ids) {
-    lsSet(STORAGE_KEYS.weakIds, ids);
+    lsSet(STORAGE_KEYS.weakIds, normalizeIdList(ids));
   }
 
   function addWeakId(id) {
+    const n = parseInt(String(id), 10);
+    if (!Number.isFinite(n)) return;
     const ids = getWeakIds();
-    if (!ids.includes(id)) {
-      ids.push(id);
+    if (!ids.includes(n)) {
+      ids.push(n);
       setWeakIds(ids);
     }
   }
 
   function removeWeakId(id) {
-    const ids = getWeakIds().filter(x => x !== id);
-    setWeakIds(ids);
+    const n = parseInt(String(id), 10);
+    if (!Number.isFinite(n)) return;
+    setWeakIds(getWeakIds().filter(x => x !== n));
+  }
+
+  // 旧バージョンで保存された "001" 文字列の weakIds を number 配列に書き戻し、
+  // 同じく文字列 id を含む cachedWords は型不整合を避けるため一度クリア。
+  // 初回起動時に 1 度だけ走らせれば十分。
+  function migrateIdStorageOnce() {
+    if (!storageAvailable) return;
+    const FLAG = "wordQuiz_idMigratedToNumber";
+    try {
+      if (localStorage.getItem(FLAG) === "1") return;
+    } catch (e) {
+      return;
+    }
+    setWeakIds(getWeakIds());
+    try {
+      localStorage.removeItem(STORAGE_KEYS.cachedWords);
+      localStorage.removeItem(STORAGE_KEYS.cachedWordsUpdatedAt);
+      localStorage.setItem(FLAG, "1");
+    } catch (e) {
+      // ignore
+    }
   }
 
   function getStartedSectionIds() {
@@ -1043,6 +1081,9 @@
   // 初期化
   // ====================================================
   async function init() {
+    // 旧フォーマット ("001" 文字列) の LocalStorage を number 化
+    migrateIdStorageOnce();
+
     // 音声非対応ならボタン隠し
     if (!speechSupported) {
       document.body.classList.add("no-speech");

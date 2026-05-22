@@ -4,7 +4,7 @@
   "count": 15,
   "data": [
     {
-      "id": "001",
+      "id": 1,
       "word": "discharge",
       "meaningJa": "退院",
       "phraseEn": "push back my discharge date",
@@ -20,7 +20,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "002",
+      "id": 2,
       "word": "swelling",
       "meaningJa": "腫れ",
       "phraseEn": "The swelling went down",
@@ -36,7 +36,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "003",
+      "id": 3,
       "word": "grateful",
       "meaningJa": "感謝している",
       "phraseEn": "Grateful for your help today",
@@ -52,7 +52,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "004",
+      "id": 4,
       "word": "prescription",
       "meaningJa": "処方箋",
       "phraseEn": "pick up my prescription",
@@ -68,7 +68,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "005",
+      "id": 5,
       "word": "appointment",
       "meaningJa": "予約",
       "phraseEn": "reschedule my appointment",
@@ -84,7 +84,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "006",
+      "id": 6,
       "word": "refund",
       "meaningJa": "返金",
       "phraseEn": "request a refund",
@@ -100,7 +100,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "007",
+      "id": 7,
       "word": "deadline",
       "meaningJa": "締め切り",
       "phraseEn": "meet the deadline",
@@ -116,7 +116,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "008",
+      "id": 8,
       "word": "commute",
       "meaningJa": "通勤する",
       "phraseEn": "commute by train",
@@ -132,7 +132,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "009",
+      "id": 9,
       "word": "errand",
       "meaningJa": "用事",
       "phraseEn": "run a quick errand",
@@ -148,7 +148,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "010",
+      "id": 10,
       "word": "leftover",
       "meaningJa": "残り物",
       "phraseEn": "reheat the leftover pasta",
@@ -164,7 +164,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "011",
+      "id": 11,
       "word": "reservation",
       "meaningJa": "予約",
       "phraseEn": "confirm the reservation",
@@ -180,7 +180,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "012",
+      "id": 12,
       "word": "humid",
       "meaningJa": "湿度の高い",
       "phraseEn": "Humid weather makes me tired",
@@ -196,7 +196,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "013",
+      "id": 13,
       "word": "laundry",
       "meaningJa": "洗濯",
       "phraseEn": "fold the laundry",
@@ -212,7 +212,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "014",
+      "id": 14,
       "word": "recipe",
       "meaningJa": "レシピ",
       "phraseEn": "follow the recipe",
@@ -228,7 +228,7 @@
       "consecutiveCorrectCount": 0
     },
     {
-      "id": "015",
+      "id": 15,
       "word": "decent",
       "meaningJa": "まともな",
       "phraseEn": "find a decent place to eat",

@@ -157,30 +157,22 @@ words
 
 | id | word | meaning_ja | phrase_en | phrase_ja | enabled | correct_count | wrong_count | last_result | last_answered_at | is_weak |
 |---|---|---|---|---|---|---:|---:|---|---|---|
-| 001 | discharge | 退院 | push back my discharge date | 退院日を延期する | TRUE | 3 | 1 | correct | 2026-05-15T10:00:00+09:00 | FALSE |
-| 002 | swelling | 腫れ | help the swelling go down | 腫れを引かせる | TRUE | 1 | 4 | wrong | 2026-05-15T10:03:00+09:00 | TRUE |
-| 003 | grateful | 感謝している | I’m truly grateful for them | 彼らに本当に感謝している | TRUE | 0 | 0 |  |  | FALSE |
+| 1 | discharge | 退院 | push back my discharge date | 退院日を延期する | TRUE | 3 | 1 | correct | 2026-05-15T10:00:00+09:00 | FALSE |
+| 2 | swelling | 腫れ | help the swelling go down | 腫れを引かせる | TRUE | 1 | 4 | wrong | 2026-05-15T10:03:00+09:00 | TRUE |
+| 3 | grateful | 感謝している | I’m truly grateful for them | 彼らに本当に感謝している | TRUE | 0 | 0 |  |  | FALSE |
 
 ---
 
 ### 6.4 ID仕様
 
-`id` は必ず一意にする。
+`id` は必ず一意の **整数** にする。
 
 推奨形式：
 
 ```text
-001
-002
-003
-```
-
-または、
-
-```text
-word_001
-word_002
-word_003
+1
+2
+3
 ```
 
 LocalStorageおよび回答結果POSTではこの `id` を使って対象単語を特定する。
@@ -268,7 +260,7 @@ https://script.google.com/macros/s/{DEPLOYMENT_ID}/exec?t=1710000000000
   "count": 3,
   "data": [
     {
-      "id": "001",
+      "id": 1,
       "word": "discharge",
       "meaningJa": "退院",
       "phraseEn": "push back my discharge date",
@@ -376,7 +368,7 @@ text/plain;charset=utf-8
 
 ```json
 {
-  "wordId": "001",
+  "wordId": 1,
   "result": "correct",
   "answeredAt": "2026-05-15T10:00:00+09:00"
 }
@@ -399,7 +391,7 @@ text/plain;charset=utf-8
 ```json
 {
   "success": true,
-  "wordId": "001",
+  "wordId": 1,
   "result": "correct",
   "correctCount": 4,
   "wrongCount": 1,
@@ -417,7 +409,7 @@ text/plain;charset=utf-8
 ```json
 {
   "success": false,
-  "message": "Word not found: 001"
+  "message": "Word not found: 1"
 }
 ```
 
@@ -1091,7 +1083,7 @@ wordQuiz_pendingAnswerLogs
 ```json
 [
   {
-    "wordId": "001",
+    "wordId": 1,
     "result": "wrong",
     "answeredAt": "2026-05-15T10:00:00+09:00"
   }
@@ -1421,7 +1413,7 @@ Apps Script URLを不用意に公開しない
 
 ```json
 {
-  "wordId": "001",
+  "wordId": 1,
   "result": "correct",
   "token": "任意の秘密文字列"
 }
