@@ -34,7 +34,9 @@
     sheetCtx: null,    // { headers, headerIndex, rowIndexById }
     signedIn: false,
     loadError: null,   // { message, kind: "structure" | "network" | "auth" | "other" }
-    autoCreateDeclinedFor: null  // 同一シートで自動作成 confirm を拒否されたら再プロンプトしない
+    autoCreateDeclinedFor: null,  // 同一シートで自動作成 confirm を拒否されたら再プロンプトしない
+    sentences: null,   // スピーキング練習用 sentence シートのキャッシュ。{ rows, ctx } / null は未ロード
+    speak: null        // { diaryId, items[], index, revealed: bool, sentenceCtx, startedAt }
   };
 
   // ====================================================
@@ -704,6 +706,7 @@
     regenCountForText: 0,   // 同一 lastInputText に対する再生成回数 (上限 2 = (F))
     items: [],              // [{...item, _selected: bool}]
     translation_en: "",
+    sentences: [],          // [{sentence_en, sentence_ja}, ...] スピーキング練習素材
     cooldownTimer: null,
     writing: false
   };
@@ -804,6 +807,7 @@
     ai.regenCountForText = 0;
     ai.items = [];
     ai.translation_en = "";
+    ai.sentences = [];
     document.getElementById("ai-input").value = "";
     document.getElementById("ai-result").classList.add("hidden");
     document.getElementById("ai-footer").classList.add("hidden");
@@ -893,6 +897,7 @@
     if (isRegenerate) ai.regenCountForText += 1;
     ai.translation_en = result.translation_en || "";
     ai.items = (result.items || []).map(it => Object.assign({}, it, { _selected: true }));
+    ai.sentences = Array.isArray(result.sentences) ? result.sentences : [];
     aiRenderResult();
   }
 
@@ -912,22 +917,50 @@
     document.getElementById("ai-cancel-btn").disabled = true;
     document.getElementById("ai-regenerate-btn").disabled = true;
 
+    const sentences = Array.isArray(ai.sentences) ? ai.sentences.slice() : [];
+    let sentencesWritten = 0;
+    let sentenceWriteFailed = false;
+
     try {
       // diary を先に保証してから 2 つの append を順に。
       const diaryCtx = await window.WQSheets.ensureDiarySheet(state.spreadsheetId);
-      await window.WQSheets.appendDiary(state.spreadsheetId, diaryCtx, {
+      const diaryResult = await window.WQSheets.appendDiary(state.spreadsheetId, diaryCtx, {
         script_ja: scriptJa, script_en: scriptEn
       });
       if (selected.length > 0) {
         await window.WQSheets.appendWords(state.spreadsheetId, selected, state.sheetCtx);
       }
+
+      // sentence シートにも対訳ペアを追加（任意・失敗してもメインフローは止めない）
+      if (sentences.length > 0 && diaryResult && Number.isFinite(diaryResult.id)) {
+        try {
+          const sentenceCtx = await window.WQSheets.ensureSentenceSheet(state.spreadsheetId);
+          const sentenceRes = await window.WQSheets.appendSentences(
+            state.spreadsheetId, sentenceCtx, diaryResult.id, sentences
+          );
+          sentencesWritten = (sentenceRes && sentenceRes.appendedIds && sentenceRes.appendedIds.length) || 0;
+          // sentence シートの内容が変わったのでキャッシュをクリアして次回開いたときに再ロード
+          state.sentences = null;
+        } catch (sentenceErr) {
+          console.warn("sentence sheet write failed:", sentenceErr);
+          sentenceWriteFailed = true;
+        }
+      }
+
       closeAiModal();
       await refresh();
+
+      const parts = [];
+      if (selected.length > 0) parts.push(selected.length + " 件の単語");
+      if (sentencesWritten > 0) parts.push(sentencesWritten + " 文のスピーキング素材");
+      const summary = parts.length > 0
+        ? parts.join(" と ") + "を追加しました。"
+        : "日記を記録しました。";
       showError(
-        selected.length > 0
-          ? selected.length + " 件の単語を追加しました。"
-          : "日記を記録しました (単語は選択されませんでした)。",
-        "info"
+        sentenceWriteFailed
+          ? summary + " (スピーキング素材の保存に失敗しました)"
+          : summary,
+        sentenceWriteFailed ? "error" : "info"
       );
     } catch (err) {
       console.error("ai confirm failed:", err);
@@ -938,6 +971,223 @@
       document.getElementById("ai-cancel-btn").disabled = false;
       aiTickCooldown();
     }
+  }
+
+  // ====================================================
+  // スピーキング練習モード
+  // ====================================================
+  function showSpeakCardIfReady() {
+    const card = document.getElementById("speak-card");
+    if (!card) return;
+    const ready = state.signedIn && state.spreadsheetId && !state.loadError;
+    if (ready) card.classList.remove("hidden");
+    else card.classList.add("hidden");
+  }
+
+  async function openSpeakList() {
+    if (!state.spreadsheetId) {
+      showError("スプレッドシートに接続してください。");
+      return;
+    }
+    document.getElementById("home-screen").hidden = true;
+    document.getElementById("speak-list-screen").hidden = false;
+
+    const loading = document.getElementById("speak-list-loading");
+    const empty = document.getElementById("speak-list-empty");
+    const list = document.getElementById("speak-list");
+
+    if (state.sentences && Array.isArray(state.sentences.rows)) {
+      loading.classList.add("hidden");
+      renderSpeakList();
+      return;
+    }
+
+    loading.classList.remove("hidden");
+    empty.classList.add("hidden");
+    list.classList.add("hidden");
+
+    try {
+      let res = await window.WQSheets.loadSentences(state.spreadsheetId);
+      if (!res.exists) {
+        // タブが無い場合はここで作成しておく（次回以降の append が速くなる）
+        const ctx = await window.WQSheets.ensureSentenceSheet(state.spreadsheetId);
+        res = { rows: [], headerIndex: ctx.headerIndex, rowIndexById: {}, maxId: ctx.maxId, exists: true };
+      }
+      state.sentences = res;
+      loading.classList.add("hidden");
+      renderSpeakList();
+    } catch (err) {
+      console.error("loadSentences failed:", err);
+      loading.classList.add("hidden");
+      empty.classList.remove("hidden");
+      document.getElementById("speak-list-empty").innerHTML =
+        '読み込みに失敗しました。<br><span class="text-xs">' + escapeHtml(err.message || String(err)) + '</span>';
+    }
+  }
+
+  function closeSpeakList() {
+    document.getElementById("speak-list-screen").hidden = true;
+    document.getElementById("home-screen").hidden = false;
+  }
+
+  function renderSpeakList() {
+    const list = document.getElementById("speak-list");
+    const empty = document.getElementById("speak-list-empty");
+    const rows = (state.sentences && state.sentences.rows) || [];
+
+    if (rows.length === 0) {
+      empty.classList.remove("hidden");
+      empty.textContent = "まだ練習素材がありません。「日本語からAIで単語を追加」から日記を登録すると、ここに表示されます。";
+      list.classList.add("hidden");
+      list.innerHTML = "";
+      return;
+    }
+
+    // diary_id ごとにグルーピング
+    const groups = new Map();
+    rows.forEach(function (r) {
+      if (!groups.has(r.diaryId)) groups.set(r.diaryId, []);
+      groups.get(r.diaryId).push(r);
+    });
+
+    // 新しい diary_id (= 後に追加された) を上に
+    const sortedDiaryIds = Array.from(groups.keys()).sort(function (a, b) { return b - a; });
+
+    list.innerHTML = "";
+    sortedDiaryIds.forEach(function (diaryId) {
+      const items = groups.get(diaryId);
+      const previewJa = items[0] ? items[0].sentenceJa : "";
+      const card = document.createElement("button");
+      card.type = "button";
+      card.dataset.diaryId = String(diaryId);
+      card.className = "block w-full text-left bg-white rounded-xl shadow-sm p-4 hover:bg-blue-50 transition";
+      card.innerHTML =
+        '<div class="flex items-center justify-between mb-1">' +
+          '<h3 class="text-sm font-semibold text-slate-700">Diary #' + diaryId + '</h3>' +
+          '<span class="text-xs text-blue-600 font-medium">' + items.length + ' 文</span>' +
+        '</div>' +
+        '<p class="text-sm text-slate-600 line-clamp-2">' + escapeHtml(previewJa) + '</p>';
+      list.appendChild(card);
+    });
+
+    empty.classList.add("hidden");
+    list.classList.remove("hidden");
+  }
+
+  function handleSpeakListClick(e) {
+    const btn = e.target.closest("button[data-diary-id]");
+    if (!btn) return;
+    const diaryId = parseInt(btn.dataset.diaryId, 10);
+    if (!Number.isFinite(diaryId)) return;
+    startSpeakingPractice(diaryId);
+  }
+
+  function startSpeakingPractice(diaryId) {
+    const rows = (state.sentences && state.sentences.rows) || [];
+    const items = rows.filter(function (r) { return r.diaryId === diaryId; });
+    if (items.length === 0) {
+      showError("この日記には練習可能な文がありません。");
+      return;
+    }
+
+    state.speak = {
+      diaryId: diaryId,
+      items: items,
+      index: 0,
+      revealed: false
+    };
+
+    document.getElementById("speak-list-screen").hidden = true;
+    document.getElementById("speak-screen").hidden = false;
+    document.getElementById("speak-summary").classList.add("hidden");
+    document.getElementById("speak-question-card").classList.remove("hidden");
+    renderSpeakQuestion();
+  }
+
+  function renderSpeakQuestion() {
+    if (!state.speak) return;
+    const s = state.speak;
+    const item = s.items[s.index];
+
+    document.getElementById("speak-progress").textContent =
+      (s.index + 1) + " / " + s.items.length;
+    document.getElementById("speak-ja").textContent = item.sentenceJa;
+
+    const input = document.getElementById("speak-input");
+    input.value = "";
+
+    s.revealed = false;
+    document.getElementById("speak-input-area").classList.remove("hidden");
+    document.getElementById("speak-answer-area").classList.add("hidden");
+
+    setTimeout(function () { input.focus(); }, 0);
+  }
+
+  function revealSpeakAnswer() {
+    if (!state.speak || state.speak.revealed) return;
+    const s = state.speak;
+    const item = s.items[s.index];
+    const userInput = document.getElementById("speak-input").value;
+
+    const yourBlock = document.getElementById("speak-your-block");
+    if (userInput.trim()) {
+      yourBlock.classList.remove("hidden");
+      document.getElementById("speak-your-input").textContent = userInput;
+    } else {
+      yourBlock.classList.add("hidden");
+    }
+
+    document.getElementById("speak-en").textContent = item.sentenceEn;
+
+    s.revealed = true;
+    document.getElementById("speak-input-area").classList.add("hidden");
+    document.getElementById("speak-answer-area").classList.remove("hidden");
+
+    // 最終練習日を非同期で更新（失敗しても UI は止めない）
+    const practicedAt = new Date().toISOString();
+    item.lastPracticedAt = practicedAt;
+    if (state.sentences && state.sentences.rowIndexById && state.sentences.headerIndex) {
+      window.WQSheets.recordSentencePracticed(
+        state.spreadsheetId,
+        { headerIndex: state.sentences.headerIndex, rowIndexById: state.sentences.rowIndexById },
+        item.id,
+        practicedAt
+      ).catch(function (err) {
+        console.warn("recordSentencePracticed failed:", err);
+      });
+    }
+  }
+
+  function advanceSpeakQuestion() {
+    if (!state.speak) return;
+    state.speak.index++;
+    if (state.speak.index >= state.speak.items.length) {
+      finishSpeakingPractice();
+    } else {
+      renderSpeakQuestion();
+    }
+  }
+
+  function finishSpeakingPractice() {
+    if (!state.speak) return;
+    document.getElementById("speak-answer-area").classList.add("hidden");
+    document.getElementById("speak-input-area").classList.add("hidden");
+    document.getElementById("speak-question-card").classList.add("hidden");
+    document.getElementById("speak-summary-text").textContent =
+      state.speak.items.length + " 文を練習しました。";
+    document.getElementById("speak-summary").classList.remove("hidden");
+  }
+
+  function backFromSpeakToList() {
+    state.speak = null;
+    document.getElementById("speak-screen").hidden = true;
+    document.getElementById("speak-list-screen").hidden = false;
+  }
+
+  function speakCurrentEn() {
+    if (!state.speak) return;
+    const item = state.speak.items[state.speak.index];
+    if (item) speak(item.sentenceEn);
   }
 
   // ====================================================
@@ -994,11 +1244,13 @@
       sectionsList.innerHTML = "";
       document.getElementById("last-updated").textContent = "シート読み込みエラー";
       showAiCardIfReady();
+      showSpeakCardIfReady();
       return;
     }
 
     show(statsPanel);
     showAiCardIfReady();
+    showSpeakCardIfReady();
   }
 
   async function handleSignIn() {
@@ -1055,6 +1307,8 @@
     state.sections = [];
     state.loadError = null;
     state.autoCreateDeclinedFor = null;
+    state.sentences = null;
+    state.speak = null;
     lsSet(STORAGE_KEYS.spreadsheetId, "");
     lsSet(STORAGE_KEYS.spreadsheetName, "");
     lsSet(STORAGE_KEYS.spreadsheetUrl, "");
@@ -1166,6 +1420,27 @@
       if (e.target === aiModal) closeAiModal();
     });
 
+    // スピーキング練習モード
+    const speakOpenBtn = document.getElementById("speak-open-btn");
+    if (speakOpenBtn) speakOpenBtn.addEventListener("click", openSpeakList);
+    const speakListBackBtn = document.getElementById("speak-list-back-btn");
+    if (speakListBackBtn) speakListBackBtn.addEventListener("click", closeSpeakList);
+    const speakList = document.getElementById("speak-list");
+    if (speakList) speakList.addEventListener("click", handleSpeakListClick);
+    const speakForm = document.getElementById("speak-form");
+    if (speakForm) speakForm.addEventListener("submit", (e) => {
+      e.preventDefault();
+      revealSpeakAnswer();
+    });
+    const speakNextBtn = document.getElementById("speak-next-btn");
+    if (speakNextBtn) speakNextBtn.addEventListener("click", advanceSpeakQuestion);
+    const speakSpeakBtn = document.getElementById("speak-speak-btn");
+    if (speakSpeakBtn) speakSpeakBtn.addEventListener("click", speakCurrentEn);
+    const speakBackBtn = document.getElementById("speak-back-btn");
+    if (speakBackBtn) speakBackBtn.addEventListener("click", backFromSpeakToList);
+    const speakSummaryBackBtn = document.getElementById("speak-summary-back-btn");
+    if (speakSummaryBackBtn) speakSummaryBackBtn.addEventListener("click", backFromSpeakToList);
+
     // 初期 UI
     updateConnectionUi();
 
@@ -1182,6 +1457,7 @@
       updateConnectionUi();
       return;
     }
+    state.sentences = null;  // 再読み込み時は sentence キャッシュも無効化
     const result = await loadWords();
     state.words = result.data;
     state.updatedAt = result.updatedAt;

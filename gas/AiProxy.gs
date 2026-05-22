@@ -77,6 +77,7 @@ function doPost(e) {
       success: true,
       translation_en: result.data.translation_en,
       items: result.data.items,
+      sentences: result.data.sentences || [],
       remaining: gate.remaining
     });
 
@@ -254,20 +255,39 @@ function callGemini(text) {
           },
           required: ["word", "meaning_ja", "phrase_en", "phrase_ja"]
         }
+      },
+      sentences: {
+        type: "array",
+        description: "translation_en を意味のまとまりで文単位に分割した対訳ペア。1 ペア = 独立した 1 文。スピーキング練習素材として使う。",
+        items: {
+          type: "object",
+          properties: {
+            sentence_en: { type: "string", description: "translation_en 内の 1 文。表現は translation_en と揃える。" },
+            sentence_ja: { type: "string", description: "sentence_en に対応する自然な日本語訳 1 文。" }
+          },
+          required: ["sentence_en", "sentence_ja"]
+        }
       }
     },
-    required: ["translation_en", "items"]
+    required: ["translation_en", "items", "sentences"]
   };
 
   const prompt =
     "次の日本語の文章を、まず自然な英語に翻訳してください。\n" +
-    "その上で、英訳の中から英語学習者にとって学ぶ価値の高い語彙・フレーズを 5〜15 個抽出し、構造化して返してください。\n\n" +
-    "抽出ルール:\n" +
+    "その上で、英訳の中から英語学習者にとって学ぶ価値の高い語彙・フレーズを 5〜15 個抽出し、構造化して返してください。\n" +
+    "さらに、英訳をスピーキング練習用に文単位の対訳ペアへ分割してください。\n\n" +
+    "語彙抽出ルール:\n" +
     "- word は 1 単語の見出し語 (小文字)。固有名詞・数字・極めて基本的すぎる語 (the/is/and など) は避ける。\n" +
     "- phrase_en はその単語を含む短い自然な英語フレーズ (2〜6 語程度、文ではなく句)。\n" +
     "- example_en / example_ja は文として完結する 1 文ずつ。\n" +
     "- meaning_ja は文脈に合う簡潔な日本語訳。\n" +
     "- 重複する見出し語は出さない。\n\n" +
+    "文分割ルール (sentences):\n" +
+    "- translation_en を意味のまとまりで文単位に分割し、各文に対応する自然な日本語訳を付ける。\n" +
+    "- 1 ペア = 独立した 1 文。複文の従属節を更に分割しない。\n" +
+    "- 各 sentence_en は最低 3 語以上の独立した文単位とし、極端に短い断片は隣接文と統合する。\n" +
+    "- 日本語と英語は 1:1 で対応させ、片方を空にしない。\n" +
+    "- sentence_en の表現は translation_en の表現と揃える (語句の言い換えや要約はしない)。\n\n" +
     "入力:\n" + text;
 
   const body = {
@@ -275,7 +295,8 @@ function callGemini(text) {
     generationConfig: {
       responseMimeType: "application/json",
       responseSchema: schema,
-      temperature: 0.2
+      temperature: 0.2,
+      maxOutputTokens: 4096
     }
   };
 
@@ -324,11 +345,21 @@ function callGemini(text) {
       return Boolean(it.meaning_ja && it.phrase_en && it.phrase_ja);
     });
 
+    const sentences = (data.sentences || []).map(function (s) {
+      return {
+        sentence_en: String((s && s.sentence_en) || "").trim(),
+        sentence_ja: String((s && s.sentence_ja) || "").trim()
+      };
+    }).filter(function (s) {
+      return s.sentence_en && s.sentence_ja;
+    });
+
     return {
       ok: true,
       data: {
         translation_en: String(data.translation_en || "").trim(),
-        items: items
+        items: items,
+        sentences: sentences
       }
     };
   } catch (err) {

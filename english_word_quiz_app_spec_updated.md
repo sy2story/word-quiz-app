@@ -2044,3 +2044,40 @@ GitHub Pages
 苦手単語や未送信データは、操作性と障害時対応のためにLocalStorageにも保存する。
 
 GitHub Pagesで公開し、PWA化することで、スマホのホーム画面からアプリのように起動できる。
+
+---
+
+## 31. スピーキング練習モード (sentence シート)
+
+`words` / `diary` に加えて、瞬発的な英訳練習のための **対訳文ペア** を保持する `sentence` シートを使う。
+
+### 31.1 sentence シートのスキーマ
+
+| 列 | 型 | 用途 |
+|---|---|---|
+| `id` | number | 行 ID。`appendWords` / `appendDiary` と同じく `maxId + 1` で採番 |
+| `diary_id` | number | `diary` シートの `id` への外部参照。1 つの日記に複数文がぶら下がる |
+| `sentence_ja` | string | 日本語 1 文。練習画面で問題として表示 |
+| `sentence_en` | string | 英語 1 文。「答えを見る」で表示 |
+| `last_practiced_at` | string (ISO) | 直近の「答えを見る」押下時刻。未練習なら空 |
+
+### 31.2 自動生成フロー
+
+1. ホームの「日本語からAIで単語を追加」モーダルから日記を投稿する
+2. AI プロキシ (`gas/AiProxy.gs`) が `translation_en` + `items` + **`sentences`** を 1 リクエストで生成
+3. クライアントは `appendDiary` で diary 行を追加し、その戻り値の `id` を `diary_id` として `appendSentences` で sentence 行を一括追加
+4. AI が `sentences` を返さなかった / `appendSentences` が失敗した場合、diary 保存は成功扱いとし、sentence は空で続行
+
+### 31.3 練習画面の挙動
+
+- ホームの「スピーキング練習」カードから日記一覧画面に入る
+- 日記カード (diary_id ごと) をタップして練習開始
+- 「日本語表示 → ユーザがテキスト入力 → 答えを見る → 英文表示 + 自分の入力 + 🔊 → 次へ」を繰り返す
+- 採点はしない (確認のみ)。マイク入力 (SpeechRecognition) は未対応
+- 「答えを見る」押下時に `last_practiced_at` を非同期更新 (失敗しても UI は継続)
+
+### 31.4 非対象
+
+- 既存 diary の遡及的 sentence 生成 (バックフィル) は提供しない
+- diary 編集後の sentence 再生成 / 編集 UI は提供しない (ユーザのスプレッドシート手動編集に委ねる)
+- 練習回数・正答率・SRS スケジューリング (今後の拡張余地)

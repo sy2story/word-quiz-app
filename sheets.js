@@ -583,6 +583,232 @@
   }
 
   // ----------------------------------------------------
+  // sentence シートの存在保証 + 既存内容のサマリ
+  // ----------------------------------------------------
+  // 戻り値: { headerIndex: {id, diary_id, sentence_ja, sentence_en, last_practiced_at}, maxId: number, created: bool }
+  const SENTENCE_HEADERS = ["id", "diary_id", "sentence_ja", "sentence_en", "last_practiced_at"];
+
+  async function ensureSentenceSheet(spreadsheetId) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+
+    const metaUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "?fields=" + encodeURIComponent("sheets.properties(title,sheetId)");
+
+    const metaRes = await authedFetch(metaUrl, { method: "GET" });
+    if (!metaRes.ok) {
+      const errBody = await safeJson(metaRes);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + metaRes.status));
+    }
+    const meta = await metaRes.json();
+    const sheets = (meta && meta.sheets) || [];
+    const hasSentence = sheets.some(function (s) {
+      return s && s.properties && s.properties.title === "sentence";
+    });
+
+    let created = false;
+    if (!hasSentence) {
+      const batchUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) + ":batchUpdate";
+      const addRes = await authedFetch(batchUrl, {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          requests: [{ addSheet: { properties: { title: "sentence" } } }]
+        })
+      });
+      if (!addRes.ok) {
+        const errBody = await safeJson(addRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + addRes.status));
+      }
+
+      const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+        encodeURIComponent(spreadsheetId) +
+        "/values/" + encodeURIComponent("sentence!A1:E1") +
+        "?valueInputOption=RAW";
+      const headerRes = await authedFetch(headerUrl, {
+        method: "PUT",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ values: [SENTENCE_HEADERS] })
+      });
+      if (!headerRes.ok) {
+        const errBody = await safeJson(headerRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + headerRes.status));
+      }
+      created = true;
+    }
+
+    const readUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("sentence!A1:E");
+    const readRes = await authedFetch(readUrl, { method: "GET" });
+    if (!readRes.ok) {
+      const errBody = await safeJson(readRes);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + readRes.status));
+    }
+    const readJson = await readRes.json();
+    const values = readJson.values || [];
+
+    let headerIndex = { id: -1, diary_id: -1, sentence_ja: -1, sentence_en: -1, last_practiced_at: -1 };
+    if (values.length > 0) {
+      const headers = values[0].map(function (h) { return String(h).trim(); });
+      headers.forEach(function (h, i) {
+        if (h in headerIndex) headerIndex[h] = i;
+      });
+    }
+    if (headerIndex.id < 0) {
+      headerIndex = { id: 0, diary_id: 1, sentence_ja: 2, sentence_en: 3, last_practiced_at: 4 };
+    }
+
+    let maxId = 0;
+    for (let r = 1; r < values.length; r++) {
+      const n = toIntId(values[r][headerIndex.id]);
+      if (Number.isFinite(n) && n > maxId) maxId = n;
+    }
+
+    return { headerIndex: headerIndex, maxId: maxId, created: created };
+  }
+
+  // ----------------------------------------------------
+  // sentence シートへ複数行を一括追加
+  // ----------------------------------------------------
+  // items: [{sentence_ja, sentence_en}, ...]
+  // 戻り値: { appendedIds: number[] }
+  async function appendSentences(spreadsheetId, ctx, diaryId, items) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+    if (!ctx || !ctx.headerIndex) throw new Error("sentenceCtx is required.");
+    if (!Array.isArray(items) || items.length === 0) return { appendedIds: [] };
+    const did = toIntId(diaryId);
+    if (!Number.isFinite(did)) throw new Error("invalid diaryId: " + diaryId);
+
+    const idx = ctx.headerIndex;
+    const baseId = ctx.maxId || 0;
+    const appendedIds = [];
+
+    const rows = items.map(function (it, i) {
+      const nextId = baseId + 1 + i;
+      appendedIds.push(nextId);
+      const row = new Array(5).fill("");
+      row[idx.id]                = nextId;
+      row[idx.diary_id]          = did;
+      row[idx.sentence_ja]       = String((it && it.sentence_ja) || "").trim();
+      row[idx.sentence_en]       = String((it && it.sentence_en) || "").trim();
+      row[idx.last_practiced_at] = "";
+      return row;
+    });
+
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("sentence!A:A") +
+      ":append?valueInputOption=RAW&insertDataOption=INSERT_ROWS";
+
+    const res = await authedFetch(url, {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: rows })
+    });
+    if (!res.ok) {
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+    return { appendedIds: appendedIds };
+  }
+
+  // ----------------------------------------------------
+  // sentence シート全件読み込み
+  // ----------------------------------------------------
+  // 戻り値: { rows: [{id, diaryId, sentenceJa, sentenceEn, lastPracticedAt}], headerIndex, rowIndexById, maxId, exists }
+  // シート/タブが無い場合は { rows: [], exists: false } を返す（呼び出し側で ensureSentenceSheet 起動の判断）
+  async function loadSentences(spreadsheetId) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("sentence!A1:E5000");
+
+    const res = await authedFetch(url, { method: "GET" });
+    if (!res.ok) {
+      if (res.status === 400) {
+        // タブが存在しない (Unable to parse range)
+        return { rows: [], headerIndex: null, rowIndexById: {}, maxId: 0, exists: false };
+      }
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+    const json = await res.json();
+    const values = json.values || [];
+    if (values.length === 0) {
+      return { rows: [], headerIndex: null, rowIndexById: {}, maxId: 0, exists: true };
+    }
+
+    const headers = values[0].map(function (h) { return String(h).trim(); });
+    const headerIndex = { id: -1, diary_id: -1, sentence_ja: -1, sentence_en: -1, last_practiced_at: -1 };
+    headers.forEach(function (h, i) { if (h in headerIndex) headerIndex[h] = i; });
+    const required = ["id", "diary_id", "sentence_ja", "sentence_en"];
+    const missing = required.filter(function (h) { return headerIndex[h] < 0; });
+    if (missing.length > 0) {
+      const e = new Error("sentence シートに必要な列がありません: " + missing.join(", "));
+      e.code = "MISSING_COLUMNS";
+      throw e;
+    }
+
+    const rows = [];
+    const rowIndexById = {};
+    let maxId = 0;
+    for (let r = 1; r < values.length; r++) {
+      const row = values[r];
+      const id = toIntId(row[headerIndex.id]);
+      const diaryId = toIntId(row[headerIndex.diary_id]);
+      if (!Number.isFinite(id) || !Number.isFinite(diaryId)) continue;
+      const sentenceJa = String(row[headerIndex.sentence_ja] || "").trim();
+      const sentenceEn = String(row[headerIndex.sentence_en] || "").trim();
+      if (!sentenceJa || !sentenceEn) continue;
+      const lastPracticedAt = headerIndex.last_practiced_at >= 0
+        ? String(row[headerIndex.last_practiced_at] || "").trim()
+        : "";
+      rows.push({
+        id: id,
+        diaryId: diaryId,
+        sentenceJa: sentenceJa,
+        sentenceEn: sentenceEn,
+        lastPracticedAt: lastPracticedAt
+      });
+      rowIndexById[id] = r + 1;
+      if (id > maxId) maxId = id;
+    }
+
+    return { rows: rows, headerIndex: headerIndex, rowIndexById: rowIndexById, maxId: maxId, exists: true };
+  }
+
+  // ----------------------------------------------------
+  // sentence の last_practiced_at セル 1 箇所だけ更新
+  // ----------------------------------------------------
+  async function recordSentencePracticed(spreadsheetId, ctx, sentenceId, practicedAt) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+    if (!ctx || !ctx.headerIndex || !ctx.rowIndexById) {
+      throw new Error("sentence context is required.");
+    }
+    const rowIdx = ctx.rowIndexById[sentenceId];
+    if (!rowIdx) throw new Error("sentence not found: " + sentenceId);
+    const colIdx = ctx.headerIndex.last_practiced_at;
+    if (colIdx == null || colIdx < 0) throw new Error("last_practiced_at column missing");
+
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("sentence!" + colLetter(colIdx) + rowIdx) +
+      "?valueInputOption=RAW";
+    const res = await authedFetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [[practicedAt || new Date().toISOString()]] })
+    });
+    if (!res.ok) {
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+  }
+
+  // ----------------------------------------------------
   // 公開 API
   // ----------------------------------------------------
   window.WQSheets = {
@@ -593,6 +819,10 @@
     appendWords: appendWords,
     ensureWordsSheet: ensureWordsSheet,
     ensureDiarySheet: ensureDiarySheet,
-    appendDiary: appendDiary
+    appendDiary: appendDiary,
+    ensureSentenceSheet: ensureSentenceSheet,
+    appendSentences: appendSentences,
+    loadSentences: loadSentences,
+    recordSentencePracticed: recordSentencePracticed
   };
 })();

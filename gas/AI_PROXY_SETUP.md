@@ -42,7 +42,9 @@ Google Apps Script Web App のセットアップ手順。
 
 エディタ上部の関数選択プルダウンで `testGeminiOnly` を選び、▶ 実行。
 初回は OAuth 同意 (このスクリプトが UrlFetch を使う権限) を求められる → 許可。
-実行ログに `{ ok: true, data: { translation_en: "...", items: [...] } }` が出れば疎通成功。
+実行ログに `{ ok: true, data: { translation_en: "...", items: [...], sentences: [...] } }` が出れば疎通成功。
+`sentences` はスピーキング練習用の対訳ペア配列 (`{sentence_en, sentence_ja}`)。
+件数 0 が続く場合はプロンプト調整を検討。
 
 ### 5. ウェブアプリとしてデプロイ
 
@@ -77,6 +79,13 @@ window.AI_PROXY_URL = "https://script.google.com/macros/s/XXXXXXXX/exec";
 - コードを変更したら **「デプロイを管理」→ 編集→ バージョン: 新しいバージョン → デプロイ** で URL を更新
   (URL は固定のまま新バージョンが反映される)
 - もし「新しいデプロイ」をしてしまうと URL が変わるので注意
+
+### スピーキング練習機能 (sentences) を有効化したいとき
+
+フロントの「スピーキング練習」モードを使うには、AI レスポンスに `sentences` フィールドが含まれている必要がある。
+リポジトリの `gas/AiProxy.gs` をエディタにコピー → 既存のコードを置き換え → 上の手順で再デプロイ。
+旧バージョンのまま運用しても日記投稿は引き続き動作するが、sentence シートには 1 行も追加されなくなる
+(クライアントは `sentences` を任意フィールドとして扱う)。
 
 ## レート制限のチューニング
 

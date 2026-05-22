@@ -1,4 +1,4 @@
-const CACHE_NAME = "word-quiz-app-v7";
+const CACHE_NAME = "word-quiz-app-v8";
 
 const STATIC_ASSETS = [
   "./",

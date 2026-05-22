@@ -132,6 +132,20 @@
         </div>
       </div>
 
+      <!-- スピーキング練習カード (シート接続済のときだけ表示) -->
+      <div id="speak-card" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold">スピーキング練習</p>
+            <p class="text-xs text-slate-500 mt-0.5">日記の英文を 1 文ずつ瞬発的に英訳する練習をします</p>
+          </div>
+          <button id="speak-open-btn" type="button"
+            class="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">
+            開く
+          </button>
+        </div>
+      </div>
+
       <div id="sections-list" class="space-y-3">
         <!-- セクションカードはJSで挿入 -->
       </div>
@@ -216,6 +230,87 @@
         <p id="quiz-summary-text" class="text-sm text-slate-600">-</p>
         <button id="summary-back-btn" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg">
           ホームに戻る
+        </button>
+      </div>
+    </section>
+
+    <!-- スピーキング練習: 日記一覧 -->
+    <section id="speak-list-screen" hidden>
+      <header class="flex items-center justify-between mb-4">
+        <button id="speak-list-back-btn" type="button" class="text-blue-600 text-sm font-medium">← 戻る</button>
+        <h2 class="text-base font-semibold">日記を選んで練習</h2>
+        <span class="w-10"></span>
+      </header>
+
+      <div id="speak-list-loading" class="bg-white rounded-xl shadow-sm p-5 text-center text-sm text-slate-500">
+        読み込み中…
+      </div>
+      <div id="speak-list-empty" class="hidden bg-white rounded-xl shadow-sm p-5 text-center text-sm text-slate-500">
+        まだ練習素材がありません。<br>「日本語からAIで単語を追加」から日記を登録すると、ここに表示されます。
+      </div>
+      <div id="speak-list" class="space-y-3 hidden">
+        <!-- 日記カードはJSで挿入 -->
+      </div>
+    </section>
+
+    <!-- スピーキング練習: 練習画面 -->
+    <section id="speak-screen" hidden>
+      <header class="flex items-center justify-between mb-4">
+        <button id="speak-back-btn" type="button" class="text-blue-600 text-sm font-medium">← 戻る</button>
+        <span id="speak-progress" class="text-xs text-slate-500">1 / 1</span>
+      </header>
+
+      <article id="speak-question-card" class="bg-white rounded-xl shadow-sm p-5 mb-4">
+        <p class="text-xs text-slate-500 mb-1">日本語</p>
+        <p id="speak-ja" class="text-lg font-semibold leading-relaxed">-</p>
+      </article>
+
+      <!-- 入力エリア（解答前） -->
+      <div id="speak-input-area" class="space-y-3">
+        <form id="speak-form" class="space-y-3" autocomplete="off">
+          <input
+            id="speak-input"
+            type="text"
+            inputmode="text"
+            autocapitalize="sentences"
+            autocorrect="off"
+            spellcheck="false"
+            placeholder="英文を入力（採点はしません、確認用）"
+            class="w-full bg-white border border-slate-300 focus:border-blue-500 focus:ring-2 focus:ring-blue-200 outline-none rounded-lg px-4 py-3 text-base"
+          >
+          <button id="speak-reveal-btn" type="submit" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg">
+            答えを見る
+          </button>
+        </form>
+      </div>
+
+      <!-- 結果エリア（解答後） -->
+      <div id="speak-answer-area" class="hidden space-y-3">
+        <div id="speak-your-block" class="hidden bg-slate-50 border border-slate-200 rounded-xl p-4">
+          <p class="text-xs text-slate-500 mb-1">あなたの入力</p>
+          <p id="speak-your-input" class="text-base break-words">-</p>
+        </div>
+
+        <article class="bg-white rounded-xl shadow-sm p-5">
+          <p class="text-xs text-slate-500 mb-1">正解</p>
+          <p id="speak-en" class="text-lg font-medium text-blue-600 leading-relaxed">-</p>
+        </article>
+
+        <button id="speak-speak-btn" type="button" class="w-full bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg">
+          🔊 英文を聞く
+        </button>
+
+        <button id="speak-next-btn" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg mt-2">
+          次へ
+        </button>
+      </div>
+
+      <!-- 終了画面 -->
+      <div id="speak-summary" class="hidden bg-white rounded-xl shadow-sm p-5 text-center space-y-3">
+        <p class="text-lg font-semibold">お疲れさまでした！</p>
+        <p id="speak-summary-text" class="text-sm text-slate-600">-</p>
+        <button id="speak-summary-back-btn" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg">
+          日記一覧に戻る
         </button>
       </div>
     </section>
