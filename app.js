@@ -709,6 +709,7 @@
     regenCountForText: 0,   // 同一 lastInputText に対する再生成回数 (上限 2 = (F))
     items: [],              // [{...item, _selected: bool}]
     translation_en: "",
+    title: "",              // AI が生成した英語タイトル (音声ファイル名に使用)
     sentences: [],          // [{sentence_en, sentence_ja}, ...] スピーキング練習素材
     cooldownTimer: null,
     writing: false
@@ -810,6 +811,7 @@
     ai.regenCountForText = 0;
     ai.items = [];
     ai.translation_en = "";
+    ai.title = "";
     ai.sentences = [];
     document.getElementById("ai-input").value = "";
     document.getElementById("ai-result").classList.add("hidden");
@@ -899,6 +901,7 @@
     ai.lastInputText = text;
     if (isRegenerate) ai.regenCountForText += 1;
     ai.translation_en = result.translation_en || "";
+    ai.title = result.title || "";
     ai.items = (result.items || []).map(it => Object.assign({}, it, { _selected: true }));
     ai.sentences = Array.isArray(result.sentences) ? result.sentences : [];
     aiRenderResult();
@@ -928,7 +931,7 @@
       // diary を先に保証してから 2 つの append を順に。
       const diaryCtx = await window.WQSheets.ensureDiarySheet(state.spreadsheetId);
       const diaryResult = await window.WQSheets.appendDiary(state.spreadsheetId, diaryCtx, {
-        script_ja: scriptJa, script_en: scriptEn
+        script_ja: scriptJa, script_en: scriptEn, title: ai.title
       });
       if (selected.length > 0) {
         await window.WQSheets.appendWords(state.spreadsheetId, selected, state.sheetCtx);
@@ -1276,9 +1279,12 @@
       const dlBadge = row.downloadedAt
         ? '<span class="text-xs text-emerald-600 font-medium shrink-0">DL済み</span>'
         : '<span class="text-xs text-slate-400 shrink-0">' + escapeHtml(row.date || "") + '</span>';
+      const heading = row.title
+        ? '#' + row.id + ' ' + escapeHtml(row.title)
+        : 'Diary #' + row.id;
       card.innerHTML =
         '<div class="flex items-center justify-between gap-2 mb-1">' +
-          '<h3 class="text-sm font-semibold text-slate-700">Diary #' + row.id + '</h3>' +
+          '<h3 class="text-sm font-semibold text-slate-700 truncate">' + heading + '</h3>' +
           dlBadge +
         '</div>' +
         '<p class="text-sm text-slate-600 line-clamp-2">' + escapeHtml(row.scriptJa || "") + '</p>';
@@ -1306,7 +1312,8 @@
     document.getElementById("diary-list-screen").hidden = true;
     document.getElementById("diary-detail-screen").hidden = false;
 
-    document.getElementById("diary-detail-title").textContent = "Diary #" + row.id;
+    document.getElementById("diary-detail-title").textContent =
+      row.title ? "#" + row.id + " " + row.title : "Diary #" + row.id;
     document.getElementById("diary-detail-date").textContent = row.date || "";
     document.getElementById("diary-detail-ja").textContent = row.scriptJa || "（日本語なし）";
 
@@ -1407,6 +1414,16 @@
     renderVoiceToggle();
   }
 
+  // タイトルをファイル名に使える形へ。空白は - に、ファイル名に使えない文字は除去。
+  function safeFilenamePart(s) {
+    return String(s || "")
+      .replace(/[\\/:*?"<>|]/g, "")   // OS で禁止される文字を除去
+      .replace(/\s+/g, "-")           // 空白 → ハイフン
+      .replace(/-+/g, "-")            // 連続ハイフンを 1 つに
+      .replace(/^[-.]+|[-.]+$/g, "")  // 先頭末尾のハイフン/ドットを除去
+      .slice(0, 50);                  // 長すぎるタイトルを抑制
+  }
+
   // base64 PCM(16bit LE/mono) → WAV Blob
   function pcmBase64ToWavBlob(base64, sampleRate) {
     const binary = atob(base64);
@@ -1476,7 +1493,8 @@
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
-      a.download = "diary-" + row.id + ".wav";
+      const titlePart = safeFilenamePart(row.title);
+      a.download = row.id + (titlePart ? "-" + titlePart : "") + ".wav";
       document.body.appendChild(a);
       a.click();
       document.body.removeChild(a);

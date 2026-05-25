@@ -6,7 +6,7 @@
 //   WQAi.cooldownSec()            -> 再生成クールダウン秒数 (15)
 //   WQAi.getCooldownRemainingSec() -> クールダウン残秒 (0 ならクリック可)
 //   WQAi.getRemaining()           -> 最後に返ってきた残量 (今日の残り回数)、未取得なら null
-//   WQAi.generate(text)           -> 生成。{ success, translation_en, items, sentences, remaining }
+//   WQAi.generate(text)           -> 生成。{ success, translation_en, title, items, sentences, remaining }
 //                                    sentences: [{ sentence_en, sentence_ja }, ...] スピーキング練習素材
 //                                    失敗時: { success:false, error, code }
 
@@ -102,6 +102,7 @@
         return {
           success: true,
           translation_en: String(json.translation_en || ""),
+          title: String(json.title || ""),
           items: Array.isArray(json.items) ? json.items : [],
           sentences: Array.isArray(json.sentences) ? json.sentences : [],
           remaining: state.remaining

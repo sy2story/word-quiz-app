@@ -93,6 +93,7 @@ function doPost(e) {
     return jsonResponse({
       success: true,
       translation_en: result.data.translation_en,
+      title: result.data.title || "",
       items: result.data.items,
       sentences: result.data.sentences || [],
       remaining: gate.remaining
@@ -429,6 +430,10 @@ function callGemini(text) {
         type: "string",
         description: "入力された日本語全文の自然な英訳。"
       },
+      title: {
+        type: "string",
+        description: "日記内容を端的に表す英語の短いタイトル (3〜6語)。固有名詞・日付・句読点は避け、内容が分かる語句にする。例: \"a rainy day at the office\"。"
+      },
       items: {
         type: "array",
         description: "英訳の中から英語学習者にとって学ぶ価値の高い語彙 5〜15 個。",
@@ -458,13 +463,17 @@ function callGemini(text) {
         }
       }
     },
-    required: ["translation_en", "items", "sentences"]
+    required: ["translation_en", "title", "items", "sentences"]
   };
 
   const prompt =
     "次の日本語の文章を、まず自然な英語に翻訳してください。\n" +
     "その上で、英訳の中から英語学習者にとって学ぶ価値の高い語彙・フレーズを 5〜15 個抽出し、構造化して返してください。\n" +
-    "さらに、英訳をスピーキング練習用に文単位の対訳ペアへ分割してください。\n\n" +
+    "さらに、英訳をスピーキング練習用に文単位の対訳ペアへ分割してください。\n" +
+    "また、日記内容を端的に表す英語の短いタイトル (3〜6語) を title として付けてください。\n\n" +
+    "タイトルのルール (title):\n" +
+    "- 英語で 3〜6 語程度。内容が一目で分かる語句にする。\n" +
+    "- 固有名詞・日付・句読点は避ける。冠詞は使ってよい (例: \"a busy morning commute\")。\n\n" +
     "語彙抽出ルール:\n" +
     "- word は 1 単語の見出し語 (小文字)。固有名詞・数字・極めて基本的すぎる語 (the/is/and など) は避ける。\n" +
     "- phrase_en はその単語を含む短い自然な英語フレーズ (2〜6 語程度、文ではなく句)。\n" +
@@ -547,6 +556,7 @@ function callGemini(text) {
       ok: true,
       data: {
         translation_en: String(data.translation_en || "").trim(),
+        title: String(data.title || "").trim(),
         items: items,
         sentences: sentences
       }
