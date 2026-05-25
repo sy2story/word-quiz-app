@@ -87,6 +87,45 @@ window.AI_PROXY_URL = "https://script.google.com/macros/s/XXXXXXXX/exec";
 旧バージョンのまま運用しても日記投稿は引き続き動作するが、sentence シートには 1 行も追加されなくなる
 (クライアントは `sentences` を任意フィールドとして扱う)。
 
+## 英語音声ダウンロード機能 (TTS / Gemini 2.5 Flash TTS) を有効化したいとき
+
+「日記の英文を確認」→ 詳細ページの **英語音声ダウンロード** ボタンは、`gas/AiProxy.gs` の
+`action: "tts"` ルート経由で **Gemini 2.5 Flash TTS** (`gemini-2.5-flash-preview-tts`) を呼び、
+生 PCM 音声を返す。フロントはそれを WAV にラップしてダウンロードする。
+
+有効化の手順:
+
+1. **モデルアクセス / 課金を確認する** ⚠️ 重要
+   - TTS は **従量課金 (有料) の対象**になりやすい。`GEMINI_API_KEY` を発行した Google AI Studio /
+     Cloud プロジェクトで、`gemini-2.5-flash-preview-tts` が利用可能か (= 課金が有効か) を確認する。
+   - 無料枠のままだと HTTP 429 / 403 で弾かれることがある。その場合は対象プロジェクトで
+     **お支払い (Billing) を有効化** する。
+   - キーは **GAS の Script Properties (`GEMINI_API_KEY`) にサーバ側で隔離**されており、`config.js`
+     には出ない。よって `CLAUDE.md` の「従量課金 API を `config.js` のキーで開放しない」方針には反しない。
+     代わりに **サーバ側の日次 TTS 上限** (下記) でコストを制御する。
+2. **`gas/AiProxy.gs` を最新版に差し替えて再デプロイ**する (「デプロイを管理 → 編集 → 新バージョン」。
+   `/exec` URL は変わらず、`AI_PROXY_URL` の変更は不要)。
+3. **新しい OAuth スコープは不要**。ダウンロード済みフラグ (`diary` シートの `audio_downloaded_at` 列)
+   の書き込みは既存の Sheets スコープで足りる。TTS はプロキシ経由 (API キー) でユーザートークンは
+   認証検証のみに使う。
+
+ダウンロードは **diary 1 エントリにつき 1 回** に制限している (シートの `audio_downloaded_at` 列に
+タイムスタンプを記録)。これはユーザーが自分のシートを編集すれば解除できるソフト制限なので、
+実コスト防御はサーバ側の日次 TTS 上限が担う。
+
+TTS 用の上限・声は `gas/AiProxy.gs` 冒頭で調整して再デプロイ:
+
+```js
+const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const TTS_VOICE_NAME = "Aoede";        // 30 種から選択 (Zephyr/Puck/Kore/Aoede ...)
+const DAILY_TTS_LIMIT_PER_USER = 5;    // 1 ユーザ / 1 日の音声ダウンロード回数
+const GLOBAL_TTS_DAILY_LIMIT = 300;    // サービス全体 / 1 日
+const MAX_TTS_CHARS = 2000;            // 音声化する英文の最大文字数
+```
+
+> ダウンロードファイルは **WAV** (Gemini TTS が返すのは生 PCM のみで MP3 は非対応のため)。
+> WAV は非圧縮なので長文ほどファイルが大きい (24kHz/16bit ≒ 48KB/秒)。
+
 ## レート制限のチューニング
 
 `gas/AiProxy.gs` 冒頭の以下を編集して再デプロイ:
@@ -110,3 +149,6 @@ const MAX_INPUT_CHARS       = 500;   // 日本語入力の最大文字数
 | `Gemini API error (HTTP 429)` | Gemini 無料枠を超過。1 分待つか翌日まで待つ |
 | `Gemini API error (HTTP 400)` | プロンプト/スキーマがバリデーション失敗。`testGeminiOnly` でログを確認 |
 | ブラウザで CORS エラー | フロントは `Content-Type` ヘッダなしの `fetch` (= text/plain) で送ること。`application/json` は preflight が走り GAS が対応していない |
+| 音声DLで `Gemini TTS API error (HTTP 429/403)` | TTS が無料枠外/未課金。対象プロジェクトで Billing を有効化。または `DAILY_TTS_LIMIT_PER_USER` 内か確認 |
+| 音声DLで `応答に音声データが含まれていません` | モデル名 (`GEMINI_TTS_MODEL`) か `responseModalities:["AUDIO"]` を確認。`gemini-2.5-flash-preview-tts` が当該リージョン/プロジェクトで使えるか確認 |
+| 「今日の音声ダウンロード上限に達しました」 | `DAILY_TTS_LIMIT_PER_USER` の上限。翌日リセット、または値を上げて再デプロイ |

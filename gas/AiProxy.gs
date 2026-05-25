@@ -24,6 +24,13 @@ const MAX_INPUT_CHARS = 500;
 const LOCK_TIMEOUT_MS = 3000;
 const GEMINI_MODEL = "gemini-3.1-flash-lite";
 
+// TTS (英語音声ダウンロード) 用。翻訳とは別枠でコストを管理する。
+const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
+const TTS_VOICE_NAME = "Aoede";           // 30 種から選択 (Zephyr/Puck/Kore/Aoede ...)
+const DAILY_TTS_LIMIT_PER_USER = 3;       // (A') 1 ユーザ / 1 日
+const GLOBAL_TTS_DAILY_LIMIT = 300;       // (C') 全ユーザ合計 / 1 日
+const MAX_TTS_CHARS = 2000;               // TTS の入力上限 (英訳本文)
+
 // ------------------------------------------------------------
 // エントリポイント
 // ------------------------------------------------------------
@@ -37,6 +44,7 @@ function doPost(e) {
     const payload = JSON.parse((e && e.postData && e.postData.contents) || "{}");
     const accessToken = String(payload.accessToken || "").trim();
     const text = String(payload.text || "").trim();
+    const action = String(payload.action || "").trim();
 
     if (!accessToken) {
       return jsonResponse({ success: false, error: "accessToken is required." });
@@ -44,6 +52,12 @@ function doPost(e) {
     if (!text) {
       return jsonResponse({ success: false, error: "text is required." });
     }
+
+    // 英語音声ダウンロード (TTS)。翻訳とは入力上限・クォータが別。
+    if (action === "tts") {
+      return handleTts(accessToken, text);
+    }
+
     if (text.length > MAX_INPUT_CHARS) {
       return jsonResponse({
         success: false,
@@ -221,6 +235,172 @@ function refundRateLimits(email) {
     if (globalCurrent > 0) props.setProperty(globalKey, String(globalCurrent - 1));
   } finally {
     try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+// ------------------------------------------------------------
+// TTS (英語音声ダウンロード)
+// ------------------------------------------------------------
+function handleTts(accessToken, text) {
+  if (text.length > MAX_TTS_CHARS) {
+    return jsonResponse({
+      success: false,
+      error: "音声化するテキストが長すぎます (" + text.length + " / " + MAX_TTS_CHARS + " 文字)。",
+      code: "INPUT_TOO_LONG"
+    });
+  }
+
+  const auth = verifyAccessToken(accessToken);
+  if (!auth.ok) {
+    return jsonResponse({ success: false, error: auth.error, code: "AUTH_FAILED" });
+  }
+
+  const gate = enforceTtsLimit(auth.email);
+  if (!gate.ok) {
+    return jsonResponse({
+      success: false,
+      error: gate.error,
+      code: gate.code || "QUOTA_EXCEEDED",
+      remaining: gate.remaining != null ? gate.remaining : 0
+    });
+  }
+
+  const result = callGeminiTts(text);
+  if (!result.ok) {
+    refundTtsLimit(auth.email);   // 失敗時はカウンタ返金
+    return jsonResponse({ success: false, error: result.error, code: "TTS_FAILED" });
+  }
+
+  return jsonResponse({
+    success: true,
+    audioBase64: result.audioBase64,
+    mimeType: result.mimeType,
+    sampleRate: result.sampleRate,
+    remaining: gate.remaining
+  });
+}
+
+function ttsUserQuotaKey(email)  { return "ttsquota_"  + todayStr() + "_" + email; }
+function ttsGlobalQuotaKey()     { return "ttsglobal_" + todayStr(); }
+
+function enforceTtsLimit(email) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(LOCK_TIMEOUT_MS)) {
+    return { ok: false, error: "サーバーが混雑しています。少し時間をおいて試してください。", code: "BUSY" };
+  }
+  try {
+    const props = PropertiesService.getScriptProperties();
+
+    // (C') 全体日次上限
+    const globalCurrent = parseInt(props.getProperty(ttsGlobalQuotaKey()) || "0", 10);
+    if (globalCurrent >= GLOBAL_TTS_DAILY_LIMIT) {
+      return {
+        ok: false,
+        error: "本日の音声生成は全体の上限に達しました。明日また試してください。",
+        code: "GLOBAL_QUOTA_EXCEEDED"
+      };
+    }
+
+    // (A') ユーザ日次上限
+    const userCurrent = parseInt(props.getProperty(ttsUserQuotaKey(email)) || "0", 10);
+    if (userCurrent >= DAILY_TTS_LIMIT_PER_USER) {
+      return {
+        ok: false,
+        error: "今日の音声ダウンロード上限 (" + DAILY_TTS_LIMIT_PER_USER + " 回) に達しました。明日また試してください。",
+        code: "QUOTA_EXCEEDED",
+        remaining: 0
+      };
+    }
+
+    props.setProperty(ttsUserQuotaKey(email), String(userCurrent + 1));
+    props.setProperty(ttsGlobalQuotaKey(),    String(globalCurrent + 1));
+
+    return { ok: true, remaining: DAILY_TTS_LIMIT_PER_USER - (userCurrent + 1) };
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+function refundTtsLimit(email) {
+  const lock = LockService.getScriptLock();
+  if (!lock.tryLock(LOCK_TIMEOUT_MS)) return;
+  try {
+    const props = PropertiesService.getScriptProperties();
+    const userKey = ttsUserQuotaKey(email);
+    const userCurrent = parseInt(props.getProperty(userKey) || "0", 10);
+    if (userCurrent > 0) props.setProperty(userKey, String(userCurrent - 1));
+
+    const globalKey = ttsGlobalQuotaKey();
+    const globalCurrent = parseInt(props.getProperty(globalKey) || "0", 10);
+    if (globalCurrent > 0) props.setProperty(globalKey, String(globalCurrent - 1));
+  } finally {
+    try { lock.releaseLock(); } catch (e) {}
+  }
+}
+
+// Gemini 2.5 Flash TTS を呼び、生 PCM (16bit/24kHz/mono) を base64 で返す。
+// 戻り値: { ok:true, audioBase64, mimeType, sampleRate } | { ok:false, error }
+function callGeminiTts(text) {
+  const apiKey = PropertiesService.getScriptProperties().getProperty("GEMINI_API_KEY");
+  if (!apiKey) {
+    return { ok: false, error: "サーバー側で GEMINI_API_KEY が未設定です。" };
+  }
+
+  // スタイル指示はテキスト先頭に自然言語で付与する (Gemini TTS の流儀)。
+  const prompt =
+    "Read the following diary entry in natural American English, " +
+    "with rich emotional expression:\n\n" + text;
+
+  const body = {
+    contents: [{ parts: [{ text: prompt }] }],
+    generationConfig: {
+      responseModalities: ["AUDIO"],
+      speechConfig: {
+        voiceConfig: {
+          prebuiltVoiceConfig: { voiceName: TTS_VOICE_NAME }
+        }
+      }
+    }
+  };
+
+  const url = "https://generativelanguage.googleapis.com/v1beta/models/" +
+    encodeURIComponent(GEMINI_TTS_MODEL) + ":generateContent?key=" + encodeURIComponent(apiKey);
+
+  try {
+    const res = UrlFetchApp.fetch(url, {
+      method: "post",
+      contentType: "application/json",
+      payload: JSON.stringify(body),
+      muteHttpExceptions: true
+    });
+    const code = res.getResponseCode();
+    const bodyText = res.getContentText();
+    if (code !== 200) {
+      return { ok: false, error: "Gemini TTS API error (HTTP " + code + "): " + bodyText.slice(0, 400) };
+    }
+    const json = JSON.parse(bodyText);
+    const part = json &&
+      json.candidates && json.candidates[0] &&
+      json.candidates[0].content && json.candidates[0].content.parts &&
+      json.candidates[0].content.parts[0];
+    const inline = part && part.inlineData;
+    if (!inline || !inline.data) {
+      return { ok: false, error: "Gemini TTS の応答に音声データが含まれていません。" };
+    }
+
+    // mimeType 例: "audio/L16;codec=pcm;rate=24000"
+    const mimeType = String(inline.mimeType || "audio/L16;rate=24000");
+    const m = mimeType.match(/rate=(\d+)/);
+    const sampleRate = m ? parseInt(m[1], 10) : 24000;
+
+    return {
+      ok: true,
+      audioBase64: inline.data,   // base64 の生 PCM (16bit LE / mono)
+      mimeType: mimeType,
+      sampleRate: sampleRate
+    };
+  } catch (err) {
+    return { ok: false, error: "Gemini TTS call failed: " + (err && err.message || err) };
   }
 }
 

@@ -843,6 +843,130 @@
   }
 
   // ----------------------------------------------------
+  // diary シート全件読み込み（本文確認・音声DL用）
+  // ----------------------------------------------------
+  // 戻り値: { rows: [{id, date, scriptJa, scriptEn, downloadedAt, rowIndex}], headerIndex, rowIndexById, exists }
+  // headerIndex.audio_downloaded_at は列が無ければ -1
+  // シート/タブが無い場合は { rows: [], exists: false } を返す
+  async function loadDiary(spreadsheetId) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("diary!A1:Z5000");
+
+    const res = await authedFetch(url, { method: "GET" });
+    if (!res.ok) {
+      if (res.status === 400) {
+        // タブが存在しない (Unable to parse range)
+        return { rows: [], headerIndex: null, rowIndexById: {}, exists: false };
+      }
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+    const json = await res.json();
+    const values = json.values || [];
+    if (values.length === 0) {
+      return { rows: [], headerIndex: null, rowIndexById: {}, exists: true };
+    }
+
+    const headers = values[0].map(function (h) { return String(h).trim(); });
+    const headerIndex = { id: -1, date: -1, script_ja: -1, script_en: -1, audio_downloaded_at: -1 };
+    headers.forEach(function (h, i) { if (h in headerIndex) headerIndex[h] = i; });
+    const required = ["id", "script_ja", "script_en"];
+    const missing = required.filter(function (h) { return headerIndex[h] < 0; });
+    if (missing.length > 0) {
+      const e = new Error("diary シートに必要な列がありません: " + missing.join(", "));
+      e.code = "MISSING_COLUMNS";
+      throw e;
+    }
+
+    const rows = [];
+    const rowIndexById = {};
+    for (let r = 1; r < values.length; r++) {
+      const row = values[r];
+      const id = toIntId(row[headerIndex.id]);
+      if (!Number.isFinite(id)) continue;
+      const scriptJa = String(row[headerIndex.script_ja] || "").trim();
+      const scriptEn = String(row[headerIndex.script_en] || "").trim();
+      if (!scriptJa && !scriptEn) continue;
+      const date = headerIndex.date >= 0 ? String(row[headerIndex.date] || "").trim() : "";
+      const downloadedAt = headerIndex.audio_downloaded_at >= 0
+        ? String(row[headerIndex.audio_downloaded_at] || "").trim()
+        : "";
+      rows.push({
+        id: id,
+        date: date,
+        scriptJa: scriptJa,
+        scriptEn: scriptEn,
+        downloadedAt: downloadedAt,
+        rowIndex: r + 1
+      });
+      rowIndexById[id] = r + 1;
+    }
+
+    return { rows: rows, headerIndex: headerIndex, rowIndexById: rowIndexById, exists: true };
+  }
+
+  // ----------------------------------------------------
+  // diary に audio_downloaded_at 列が無ければ末尾に追加し、その列インデックスを返す
+  // ----------------------------------------------------
+  async function ensureDiaryDownloadColumn(spreadsheetId, headerIndex) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+    if (headerIndex && headerIndex.audio_downloaded_at >= 0) {
+      return headerIndex.audio_downloaded_at;
+    }
+    // 既存の最大列インデックス（既知ヘッダの最大値）の次に置く。
+    // headerIndex が無い場合のフォールバックは D(3) の次 = E(4)。
+    let maxCol = -1;
+    if (headerIndex) {
+      ["id", "date", "script_ja", "script_en"].forEach(function (k) {
+        if (headerIndex[k] > maxCol) maxCol = headerIndex[k];
+      });
+    }
+    const colIdx = (maxCol >= 0 ? maxCol : 3) + 1;
+
+    const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("diary!" + colLetter(colIdx) + "1") +
+      "?valueInputOption=RAW";
+    const res = await authedFetch(headerUrl, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [["audio_downloaded_at"]] })
+    });
+    if (!res.ok) {
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+    if (headerIndex) headerIndex.audio_downloaded_at = colIdx;
+    return colIdx;
+  }
+
+  // ----------------------------------------------------
+  // diary の audio_downloaded_at セル 1 箇所だけ更新
+  // ----------------------------------------------------
+  async function recordDiaryDownloaded(spreadsheetId, colIdx, rowIdx, ts) {
+    if (!spreadsheetId) throw new Error("spreadsheetId is required.");
+    if (colIdx == null || colIdx < 0) throw new Error("audio_downloaded_at column missing");
+    if (!rowIdx) throw new Error("diary row not found");
+
+    const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("diary!" + colLetter(colIdx) + rowIdx) +
+      "?valueInputOption=RAW";
+    const res = await authedFetch(url, {
+      method: "PUT",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify({ values: [[ts || new Date().toISOString()]] })
+    });
+    if (!res.ok) {
+      const errBody = await safeJson(res);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + res.status));
+    }
+  }
+
+  // ----------------------------------------------------
   // 公開 API
   // ----------------------------------------------------
   window.WQSheets = {
@@ -855,6 +979,9 @@
     createSpreadsheet: createSpreadsheet,
     ensureDiarySheet: ensureDiarySheet,
     appendDiary: appendDiary,
+    loadDiary: loadDiary,
+    ensureDiaryDownloadColumn: ensureDiaryDownloadColumn,
+    recordDiaryDownloaded: recordDiaryDownloaded,
     ensureSentenceSheet: ensureSentenceSheet,
     appendSentences: appendSentences,
     loadSentences: loadSentences,

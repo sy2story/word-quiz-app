@@ -36,7 +36,9 @@
     loadError: null,   // { message, kind: "structure" | "network" | "auth" | "other" }
     autoCreateDeclinedFor: null,  // 同一シートで自動作成 confirm を拒否されたら再プロンプトしない
     sentences: null,   // スピーキング練習用 sentence シートのキャッシュ。{ rows, ctx } / null は未ロード
-    speak: null        // { diaryId, items[], index, revealed: bool, sentenceCtx, startedAt }
+    speak: null,       // { diaryId, items[], index, revealed: bool, sentenceCtx, startedAt }
+    diary: null,       // 日記確認用 diary シートのキャッシュ。{ rows, headerIndex, rowIndexById, exists } / null は未ロード
+    diaryCurrent: null // 詳細表示中の diary 行 (state.diary.rows の要素への参照)
   };
 
   // ====================================================
@@ -1191,6 +1193,287 @@
   }
 
   // ====================================================
+  // 日記確認モード（本文閲覧 + 英語音声ダウンロード）
+  // ====================================================
+  function showDiaryCardIfReady() {
+    const card = document.getElementById("diary-card");
+    if (!card) return;
+    const ready = state.signedIn && state.spreadsheetId && !state.loadError;
+    if (ready) card.classList.remove("hidden");
+    else card.classList.add("hidden");
+  }
+
+  async function openDiaryList() {
+    if (!state.spreadsheetId) {
+      showError("スプレッドシートに接続してください。");
+      return;
+    }
+    document.getElementById("home-screen").hidden = true;
+    document.getElementById("diary-list-screen").hidden = false;
+
+    const loading = document.getElementById("diary-list-loading");
+    const empty = document.getElementById("diary-list-empty");
+    const list = document.getElementById("diary-list");
+
+    if (state.diary && Array.isArray(state.diary.rows)) {
+      loading.classList.add("hidden");
+      renderDiaryList();
+      return;
+    }
+
+    loading.classList.remove("hidden");
+    empty.classList.add("hidden");
+    list.classList.add("hidden");
+
+    try {
+      let res = await window.WQSheets.loadDiary(state.spreadsheetId);
+      if (!res.exists) {
+        // タブが無ければ作成（次回以降の append が速くなる）
+        const ctx = await window.WQSheets.ensureDiarySheet(state.spreadsheetId);
+        res = { rows: [], headerIndex: { id: 0, date: 1, script_ja: 2, script_en: 3, audio_downloaded_at: -1 }, rowIndexById: {}, exists: true };
+        if (ctx && ctx.headerIndex) res.headerIndex = Object.assign({ audio_downloaded_at: -1 }, ctx.headerIndex);
+      }
+      state.diary = res;
+      loading.classList.add("hidden");
+      renderDiaryList();
+    } catch (err) {
+      console.error("loadDiary failed:", err);
+      loading.classList.add("hidden");
+      empty.classList.remove("hidden");
+      empty.innerHTML =
+        '読み込みに失敗しました。<br><span class="text-xs">' + escapeHtml(err.message || String(err)) + '</span>';
+    }
+  }
+
+  function closeDiaryList() {
+    document.getElementById("diary-list-screen").hidden = true;
+    document.getElementById("home-screen").hidden = false;
+  }
+
+  function renderDiaryList() {
+    const list = document.getElementById("diary-list");
+    const empty = document.getElementById("diary-list-empty");
+    const rows = (state.diary && state.diary.rows) || [];
+
+    if (rows.length === 0) {
+      empty.classList.remove("hidden");
+      empty.innerHTML = 'まだ日記がありません。<br>「日本語からAIで単語を追加」から日記を登録すると、ここに表示されます。';
+      list.classList.add("hidden");
+      list.innerHTML = "";
+      return;
+    }
+
+    // id 降順（新しい日記を上に）
+    const sorted = rows.slice().sort(function (a, b) { return b.id - a.id; });
+
+    list.innerHTML = "";
+    sorted.forEach(function (row) {
+      const card = document.createElement("button");
+      card.type = "button";
+      card.dataset.diaryId = String(row.id);
+      card.className = "block w-full text-left bg-white rounded-xl shadow-sm p-4 hover:bg-blue-50 transition";
+      const dlBadge = row.downloadedAt
+        ? '<span class="text-xs text-emerald-600 font-medium shrink-0">DL済み</span>'
+        : '<span class="text-xs text-slate-400 shrink-0">' + escapeHtml(row.date || "") + '</span>';
+      card.innerHTML =
+        '<div class="flex items-center justify-between gap-2 mb-1">' +
+          '<h3 class="text-sm font-semibold text-slate-700">Diary #' + row.id + '</h3>' +
+          dlBadge +
+        '</div>' +
+        '<p class="text-sm text-slate-600 line-clamp-2">' + escapeHtml(row.scriptJa || "") + '</p>';
+      list.appendChild(card);
+    });
+
+    empty.classList.add("hidden");
+    list.classList.remove("hidden");
+  }
+
+  function handleDiaryListClick(e) {
+    const btn = e.target.closest("button[data-diary-id]");
+    if (!btn) return;
+    const diaryId = parseInt(btn.dataset.diaryId, 10);
+    if (!Number.isFinite(diaryId)) return;
+    openDiaryDetail(diaryId);
+  }
+
+  function openDiaryDetail(diaryId) {
+    const rows = (state.diary && state.diary.rows) || [];
+    const row = rows.find(function (r) { return r.id === diaryId; });
+    if (!row) return;
+    state.diaryCurrent = row;
+
+    document.getElementById("diary-list-screen").hidden = true;
+    document.getElementById("diary-detail-screen").hidden = false;
+
+    document.getElementById("diary-detail-title").textContent = "Diary #" + row.id;
+    document.getElementById("diary-detail-date").textContent = row.date || "";
+    document.getElementById("diary-detail-ja").textContent = row.scriptJa || "（日本語なし）";
+
+    // 英文は伏せておく
+    const enEl = document.getElementById("diary-detail-en");
+    const revealBtn = document.getElementById("diary-reveal-btn");
+    enEl.textContent = row.scriptEn || "（英文なし）";
+    enEl.classList.add("hidden");
+    revealBtn.classList.remove("hidden");
+
+    // エラー表示をクリア
+    diaryDetailError("");
+
+    // ダウンロードボタン状態
+    updateDiaryDownloadBtn();
+  }
+
+  function backFromDetailToList() {
+    state.diaryCurrent = null;
+    document.getElementById("diary-detail-screen").hidden = true;
+    document.getElementById("diary-list-screen").hidden = false;
+    renderDiaryList();
+  }
+
+  function revealDiaryEn() {
+    document.getElementById("diary-detail-en").classList.remove("hidden");
+    document.getElementById("diary-reveal-btn").classList.add("hidden");
+  }
+
+  function playDiaryEn() {
+    const row = state.diaryCurrent;
+    if (!row || !row.scriptEn) {
+      diaryDetailError("再生できる英文がありません。");
+      return;
+    }
+    speak(row.scriptEn);
+  }
+
+  function diaryDetailError(msg) {
+    const el = document.getElementById("diary-detail-error");
+    if (!el) return;
+    if (!msg) {
+      el.classList.add("hidden");
+      el.textContent = "";
+    } else {
+      el.textContent = msg;
+      el.classList.remove("hidden");
+    }
+  }
+
+  function updateDiaryDownloadBtn() {
+    const row = state.diaryCurrent;
+    const btn = document.getElementById("diary-download-btn");
+    const note = document.getElementById("diary-download-note");
+    if (!btn || !row) return;
+
+    if (row.downloadedAt) {
+      btn.disabled = true;
+      btn.textContent = "⬇️ ダウンロード済み";
+      note.textContent = "この日記の音声は既にダウンロード済みです（1エントリにつき1回）。";
+      note.classList.remove("hidden");
+    } else {
+      btn.disabled = false;
+      btn.textContent = "⬇️ 英語音声をダウンロード";
+      note.textContent = "ダウンロードは1エントリにつき1回までです。";
+      note.classList.remove("hidden");
+    }
+  }
+
+  // base64 PCM(16bit LE/mono) → WAV Blob
+  function pcmBase64ToWavBlob(base64, sampleRate) {
+    const binary = atob(base64);
+    const pcmLen = binary.length;            // バイト数（16bit なので偶数のはず）
+    const buffer = new ArrayBuffer(44 + pcmLen);
+    const view = new DataView(buffer);
+
+    function writeStr(offset, str) {
+      for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
+    }
+
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const byteRate = sampleRate * numChannels * bitsPerSample / 8;
+    const blockAlign = numChannels * bitsPerSample / 8;
+
+    writeStr(0, "RIFF");
+    view.setUint32(4, 36 + pcmLen, true);
+    writeStr(8, "WAVE");
+    writeStr(12, "fmt ");
+    view.setUint32(16, 16, true);            // fmt チャンクサイズ
+    view.setUint16(20, 1, true);             // PCM
+    view.setUint16(22, numChannels, true);
+    view.setUint32(24, sampleRate, true);
+    view.setUint32(28, byteRate, true);
+    view.setUint16(32, blockAlign, true);
+    view.setUint16(34, bitsPerSample, true);
+    writeStr(36, "data");
+    view.setUint32(40, pcmLen, true);
+
+    for (let i = 0; i < pcmLen; i++) view.setUint8(44 + i, binary.charCodeAt(i) & 0xff);
+
+    return new Blob([buffer], { type: "audio/wav" });
+  }
+
+  async function downloadDiaryAudio() {
+    const row = state.diaryCurrent;
+    if (!row) return;
+    if (row.downloadedAt) {
+      diaryDetailError("この日記は既にダウンロード済みです。");
+      return;
+    }
+    if (!row.scriptEn) {
+      diaryDetailError("音声化できる英文がありません。");
+      return;
+    }
+    if (!window.WQAi || !window.WQAi.isEnabled()) {
+      diaryDetailError("音声生成が設定されていません (AI_PROXY_URL 未設定)。");
+      return;
+    }
+
+    diaryDetailError("");
+    const btn = document.getElementById("diary-download-btn");
+    btn.disabled = true;
+    btn.textContent = "🔄 音声を生成中…";
+
+    try {
+      const res = await window.WQAi.generateTts(row.scriptEn);
+      if (!res.success) {
+        diaryDetailError(res.error || "音声生成に失敗しました。");
+        updateDiaryDownloadBtn();
+        return;
+      }
+
+      // WAV を生成してダウンロード
+      const blob = pcmBase64ToWavBlob(res.audioBase64, res.sampleRate || 24000);
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = "diary-" + row.id + ".wav";
+      document.body.appendChild(a);
+      a.click();
+      document.body.removeChild(a);
+      setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
+
+      // diary シートにダウンロード時刻を記録（1回制限）
+      const ts = new Date().toISOString();
+      try {
+        const colIdx = await window.WQSheets.ensureDiaryDownloadColumn(
+          state.spreadsheetId, state.diary && state.diary.headerIndex
+        );
+        if (state.diary && state.diary.headerIndex) state.diary.headerIndex.audio_downloaded_at = colIdx;
+        await window.WQSheets.recordDiaryDownloaded(state.spreadsheetId, colIdx, row.rowIndex, ts);
+        row.downloadedAt = ts;
+      } catch (recErr) {
+        console.error("recordDiaryDownloaded failed:", recErr);
+        // 記録に失敗してもダウンロード自体は完了している。フラグだけ立てて再DLは抑止。
+        row.downloadedAt = ts;
+        diaryDetailError("音声はダウンロードしましたが、ダウンロード記録の保存に失敗しました: " + (recErr.message || recErr));
+      }
+    } catch (err) {
+      console.error("downloadDiaryAudio failed:", err);
+      diaryDetailError("ダウンロードに失敗しました: " + (err.message || String(err)));
+    } finally {
+      updateDiaryDownloadBtn();
+    }
+  }
+
+  // ====================================================
   // 接続状態 UI
   // ====================================================
   function updateConnectionUi() {
@@ -1245,12 +1528,14 @@
       document.getElementById("last-updated").textContent = "シート読み込みエラー";
       showAiCardIfReady();
       showSpeakCardIfReady();
+      showDiaryCardIfReady();
       return;
     }
 
     show(statsPanel);
     showAiCardIfReady();
     showSpeakCardIfReady();
+    showDiaryCardIfReady();
   }
 
   async function handleSignIn() {
@@ -1468,6 +1753,22 @@
     const speakSummaryBackBtn = document.getElementById("speak-summary-back-btn");
     if (speakSummaryBackBtn) speakSummaryBackBtn.addEventListener("click", backFromSpeakToList);
 
+    // 日記確認モード
+    const diaryOpenBtn = document.getElementById("diary-open-btn");
+    if (diaryOpenBtn) diaryOpenBtn.addEventListener("click", openDiaryList);
+    const diaryListBackBtn = document.getElementById("diary-list-back-btn");
+    if (diaryListBackBtn) diaryListBackBtn.addEventListener("click", closeDiaryList);
+    const diaryList = document.getElementById("diary-list");
+    if (diaryList) diaryList.addEventListener("click", handleDiaryListClick);
+    const diaryDetailBackBtn = document.getElementById("diary-detail-back-btn");
+    if (diaryDetailBackBtn) diaryDetailBackBtn.addEventListener("click", backFromDetailToList);
+    const diaryRevealBtn = document.getElementById("diary-reveal-btn");
+    if (diaryRevealBtn) diaryRevealBtn.addEventListener("click", revealDiaryEn);
+    const diaryPlayBtn = document.getElementById("diary-play-btn");
+    if (diaryPlayBtn) diaryPlayBtn.addEventListener("click", playDiaryEn);
+    const diaryDownloadBtn = document.getElementById("diary-download-btn");
+    if (diaryDownloadBtn) diaryDownloadBtn.addEventListener("click", downloadDiaryAudio);
+
     // 初期 UI
     updateConnectionUi();
 
@@ -1485,6 +1786,7 @@
       return;
     }
     state.sentences = null;  // 再読み込み時は sentence キャッシュも無効化
+    state.diary = null;      // diary キャッシュも無効化
     const result = await loadWords();
     state.words = result.data;
     state.updatedAt = result.updatedAt;

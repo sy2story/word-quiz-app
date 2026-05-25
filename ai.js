@@ -15,11 +15,14 @@
 
   const COOLDOWN_SEC = 15;        // (E) クライアント側の再生成クールダウン
   const MAX_INPUT_CHARS = 500;    // サーバと一致させる二重防御
+  const MAX_TTS_CHARS = 2000;     // TTS 入力上限 (サーバと一致)
 
   const state = {
     lastCallAt: 0,        // 最後にサーバから 200 が返った時刻 (Date.now)
     remaining: null,      // サーバが返した今日の残り回数
-    inFlight: false       // 多重リクエスト防止 (H)
+    inFlight: false,      // 多重リクエスト防止 (H)
+    ttsInFlight: false,   // TTS の多重リクエスト防止
+    ttsRemaining: null    // サーバが返した今日の TTS 残り回数
   };
 
   function isEnabled() {
@@ -125,12 +128,92 @@
     }
   }
 
+  // 英語音声 (TTS) を生成。Gemini 2.5 Flash TTS の生 PCM を base64 で受け取る。
+  // 戻り値: { success, audioBase64, mimeType, sampleRate, ttsRemaining } / 失敗時 { success:false, error, code }
+  async function generateTts(text) {
+    if (!isEnabled()) {
+      return { success: false, error: "AI_PROXY_URL が設定されていません。", code: "NOT_CONFIGURED" };
+    }
+    text = String(text || "").trim();
+    if (!text) {
+      return { success: false, error: "音声化する英文がありません。", code: "EMPTY_INPUT" };
+    }
+    if (text.length > MAX_TTS_CHARS) {
+      return {
+        success: false,
+        error: "英文が長すぎます (" + text.length + " / " + MAX_TTS_CHARS + " 文字)。",
+        code: "INPUT_TOO_LONG"
+      };
+    }
+    if (state.ttsInFlight) {
+      return { success: false, error: "前の音声生成が処理中です。少しお待ちください。", code: "IN_FLIGHT" };
+    }
+
+    let accessToken;
+    try {
+      accessToken = await window.WQAuth.getAccessToken();
+    } catch (err) {
+      return { success: false, error: "Googleへのサインインが必要です。", code: "AUTH_REQUIRED" };
+    }
+
+    state.ttsInFlight = true;
+    try {
+      // 翻訳と同じく text/plain で送って preflight を回避する。
+      const res = await fetch(window.AI_PROXY_URL, {
+        method: "POST",
+        body: JSON.stringify({ action: "tts", text: text, accessToken: accessToken }),
+        redirect: "follow"
+      });
+
+      let json;
+      try {
+        json = await res.json();
+      } catch (e) {
+        return {
+          success: false,
+          error: "サーバーから不正な応答が返りました (HTTP " + res.status + ")。",
+          code: "BAD_RESPONSE"
+        };
+      }
+
+      if (json && json.success === true && json.audioBase64) {
+        if (typeof json.remaining === "number") state.ttsRemaining = json.remaining;
+        return {
+          success: true,
+          audioBase64: String(json.audioBase64),
+          mimeType: String(json.mimeType || "audio/L16;rate=24000"),
+          sampleRate: (typeof json.sampleRate === "number") ? json.sampleRate : 24000,
+          ttsRemaining: state.ttsRemaining
+        };
+      }
+
+      if (json && typeof json.remaining === "number") state.ttsRemaining = json.remaining;
+      return {
+        success: false,
+        error: (json && json.error) || "不明なエラー (HTTP " + res.status + ")。",
+        code: (json && json.code) || "UNKNOWN_ERROR",
+        ttsRemaining: state.ttsRemaining
+      };
+
+    } catch (err) {
+      return {
+        success: false,
+        error: "通信に失敗しました: " + (err && err.message || err),
+        code: "NETWORK_ERROR"
+      };
+    } finally {
+      state.ttsInFlight = false;
+    }
+  }
+
   window.WQAi = {
     isEnabled: isEnabled,
     cooldownSec: cooldownSec,
     getCooldownRemainingSec: getCooldownRemainingSec,
     getRemaining: getRemaining,
     generate: generate,
-    MAX_INPUT_CHARS: MAX_INPUT_CHARS
+    generateTts: generateTts,
+    MAX_INPUT_CHARS: MAX_INPUT_CHARS,
+    MAX_TTS_CHARS: MAX_TTS_CHARS
   };
 })();
