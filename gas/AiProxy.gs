@@ -94,6 +94,7 @@ function doPost(e) {
       success: true,
       translation_en: result.data.translation_en,
       title: result.data.title || "",
+      explanation: result.data.explanation || "",
       items: result.data.items,
       sentences: result.data.sentences || [],
       remaining: gate.remaining
@@ -434,6 +435,10 @@ function callGemini(text) {
         type: "string",
         description: "日記内容を端的に表す英語の短いタイトル (3〜6語)。固有名詞・日付・句読点は避け、内容が分かる語句にする。例: \"a rainy day at the office\"。"
       },
+      explanation: {
+        type: "string",
+        description: "英訳に含まれる表現(語彙・イディオム)または文法のうち学習価値の高いポイントを1〜2個選び、日本語で解説した文章。各ポイントは対象の英語表現/英文を行頭に示し、その下に日本語で解説する。複数ポイントは空行で区切る。"
+      },
       items: {
         type: "array",
         description: "英訳の中から英語学習者にとって学ぶ価値の高い語彙 5〜15 個。",
@@ -463,7 +468,7 @@ function callGemini(text) {
         }
       }
     },
-    required: ["translation_en", "title", "items", "sentences"]
+    required: ["translation_en", "title", "explanation", "items", "sentences"]
   };
 
   const prompt =
@@ -474,6 +479,18 @@ function callGemini(text) {
     "タイトルのルール (title):\n" +
     "- 英語で 3〜6 語程度。内容が一目で分かる語句にする。\n" +
     "- 固有名詞・日付・句読点は避ける。冠詞は使ってよい (例: \"a busy morning commute\")。\n\n" +
+    "解説のルール (explanation):\n" +
+    "- 英訳の中から、表現 (語彙・イディオム) または文法のうち学習価値の高いポイントを 1〜2 個だけ選ぶ。\n" +
+    "- 各ポイントは、対象となる英語表現または英文を行頭に示し、その下の行から日本語で解説する。\n" +
+    "- 表現なら意味と使い方を、文法なら文法名 (例: 現在完了進行形) とその用法を日本語で説明する。\n" +
+    "- 複数ポイントは空行 (改行2つ) で区切る。全体で日本語 300〜500 字程度。\n" +
+    "- 例:\n" +
+    "read-aloud session\n" +
+    "読み聞かせ会\n" +
+    "「read-aloud」は、本などを声に出して読むことを意味します。「session」は、特定の活動のために設けられた時間や会合を指します。\n" +
+    "\n" +
+    "I have been reading a lot lately.\n" +
+    "「最近読書をしています」は、最近始まった読書習慣が今も続いているという意味なので、現在完了進行形を使用しています。\n\n" +
     "語彙抽出ルール:\n" +
     "- word は 1 単語の見出し語 (小文字)。固有名詞・数字・極めて基本的すぎる語 (the/is/and など) は避ける。\n" +
     "- phrase_en はその単語を含む短い自然な英語フレーズ (2〜6 語程度、文ではなく句)。\n" +
@@ -494,7 +511,7 @@ function callGemini(text) {
       responseMimeType: "application/json",
       responseSchema: schema,
       temperature: 0.2,
-      maxOutputTokens: 4096
+      maxOutputTokens: 8192
     }
   };
 
@@ -557,6 +574,7 @@ function callGemini(text) {
       data: {
         translation_en: String(data.translation_en || "").trim(),
         title: String(data.title || "").trim(),
+        explanation: String(data.explanation || "").trim(),
         items: items,
         sentences: sentences
       }

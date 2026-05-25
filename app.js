@@ -710,6 +710,7 @@
     items: [],              // [{...item, _selected: bool}]
     translation_en: "",
     title: "",              // AI が生成した英語タイトル (音声ファイル名に使用)
+    explanation: "",        // AI が生成した日本語の表現・文法解説
     sentences: [],          // [{sentence_en, sentence_ja}, ...] スピーキング練習素材
     cooldownTimer: null,
     writing: false
@@ -812,6 +813,7 @@
     ai.items = [];
     ai.translation_en = "";
     ai.title = "";
+    ai.explanation = "";
     ai.sentences = [];
     document.getElementById("ai-input").value = "";
     document.getElementById("ai-result").classList.add("hidden");
@@ -902,6 +904,7 @@
     if (isRegenerate) ai.regenCountForText += 1;
     ai.translation_en = result.translation_en || "";
     ai.title = result.title || "";
+    ai.explanation = result.explanation || "";
     ai.items = (result.items || []).map(it => Object.assign({}, it, { _selected: true }));
     ai.sentences = Array.isArray(result.sentences) ? result.sentences : [];
     aiRenderResult();
@@ -931,7 +934,7 @@
       // diary を先に保証してから 2 つの append を順に。
       const diaryCtx = await window.WQSheets.ensureDiarySheet(state.spreadsheetId);
       const diaryResult = await window.WQSheets.appendDiary(state.spreadsheetId, diaryCtx, {
-        script_ja: scriptJa, script_en: scriptEn, title: ai.title
+        script_ja: scriptJa, script_en: scriptEn, title: ai.title, explanation: ai.explanation
       });
       if (selected.length > 0) {
         await window.WQSheets.appendWords(state.spreadsheetId, selected, state.sheetCtx);
@@ -1324,6 +1327,13 @@
     enEl.classList.add("hidden");
     revealBtn.classList.remove("hidden");
 
+    // 解説も伏せておく
+    const explEl = document.getElementById("diary-detail-explanation");
+    const explBtn = document.getElementById("diary-explanation-btn");
+    explEl.textContent = row.explanation || "（解説なし）";
+    explEl.classList.add("hidden");
+    explBtn.classList.remove("hidden");
+
     // エラー表示をクリア
     diaryDetailError("");
 
@@ -1341,6 +1351,11 @@
   function revealDiaryEn() {
     document.getElementById("diary-detail-en").classList.remove("hidden");
     document.getElementById("diary-reveal-btn").classList.add("hidden");
+  }
+
+  function revealDiaryExplanation() {
+    document.getElementById("diary-detail-explanation").classList.remove("hidden");
+    document.getElementById("diary-explanation-btn").classList.add("hidden");
   }
 
   function playDiaryEn() {
@@ -1814,6 +1829,8 @@
     if (diaryDetailBackBtn) diaryDetailBackBtn.addEventListener("click", backFromDetailToList);
     const diaryRevealBtn = document.getElementById("diary-reveal-btn");
     if (diaryRevealBtn) diaryRevealBtn.addEventListener("click", revealDiaryEn);
+    const diaryExplanationBtn = document.getElementById("diary-explanation-btn");
+    if (diaryExplanationBtn) diaryExplanationBtn.addEventListener("click", revealDiaryExplanation);
     const diaryPlayBtn = document.getElementById("diary-play-btn");
     if (diaryPlayBtn) diaryPlayBtn.addEventListener("click", playDiaryEn);
     const diaryDownloadBtn = document.getElementById("diary-download-btn");

@@ -492,7 +492,7 @@
   // ----------------------------------------------------
   // diary シートの存在保証 + 既存内容のサマリ
   // ----------------------------------------------------
-  // 戻り値: { headerIndex: {id, date, title, script_ja, script_en}, maxId: number, created: bool }
+  // 戻り値: { headerIndex: {id, date, title, script_ja, script_en, explanation}, maxId: number, created: bool }
   async function ensureDiarySheet(spreadsheetId) {
     if (!spreadsheetId) throw new Error("spreadsheetId is required.");
 
@@ -531,12 +531,12 @@
 
       const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
         encodeURIComponent(spreadsheetId) +
-        "/values/" + encodeURIComponent("diary!A1:E1") +
+        "/values/" + encodeURIComponent("diary!A1:F1") +
         "?valueInputOption=RAW";
       const headerRes = await authedFetch(headerUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values: [["id", "date", "title", "script_ja", "script_en"]] })
+        body: JSON.stringify({ values: [["id", "date", "title", "script_ja", "script_en", "explanation"]] })
       });
       if (!headerRes.ok) {
         const errBody = await safeJson(headerRes);
@@ -558,7 +558,7 @@
     const readJson = await readRes.json();
     const values = readJson.values || [];
 
-    let headerIndex = { id: -1, date: -1, title: -1, script_ja: -1, script_en: -1 };
+    let headerIndex = { id: -1, date: -1, title: -1, script_ja: -1, script_en: -1, explanation: -1 };
     if (values.length > 0) {
       const headers = values[0].map(function (h) { return String(h).trim(); });
       headers.forEach(function (h, i) {
@@ -566,29 +566,33 @@
       });
     }
     // 既存ヘッダが揃っていなければ補正 (新規作成直後は問題なし)
-    if (headerIndex.id < 0) headerIndex = { id: 0, date: 1, title: 2, script_ja: 3, script_en: 4 };
+    if (headerIndex.id < 0) headerIndex = { id: 0, date: 1, title: 2, script_ja: 3, script_en: 4, explanation: 5 };
 
-    // 旧シート (title 列なし) には title 列を末尾に追加する
-    if (headerIndex.title < 0) {
+    // 旧シートに無い任意列 (title / explanation) を末尾へ順に追加する。
+    // 追加のたびに最大列が増えるので、毎回 max を計算し直して衝突を防ぐ。
+    const optionalCols = ["title", "explanation"];
+    for (let ci = 0; ci < optionalCols.length; ci++) {
+      const key = optionalCols[ci];
+      if (headerIndex[key] >= 0) continue;
       let maxCol = -1;
-      ["id", "date", "script_ja", "script_en"].forEach(function (k) {
+      Object.keys(headerIndex).forEach(function (k) {
         if (headerIndex[k] > maxCol) maxCol = headerIndex[k];
       });
-      const titleCol = (maxCol >= 0 ? maxCol : 3) + 1;
-      const titleHeaderUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      const newCol = (maxCol >= 0 ? maxCol : 3) + 1;
+      const colHeaderUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
         encodeURIComponent(spreadsheetId) +
-        "/values/" + encodeURIComponent("diary!" + colLetter(titleCol) + "1") +
+        "/values/" + encodeURIComponent("diary!" + colLetter(newCol) + "1") +
         "?valueInputOption=RAW";
-      const titleRes = await authedFetch(titleHeaderUrl, {
+      const colRes = await authedFetch(colHeaderUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values: [["title"]] })
+        body: JSON.stringify({ values: [[key]] })
       });
-      if (!titleRes.ok) {
-        const errBody = await safeJson(titleRes);
-        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + titleRes.status));
+      if (!colRes.ok) {
+        const errBody = await safeJson(colRes);
+        throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + colRes.status));
       }
-      headerIndex.title = titleCol;
+      headerIndex[key] = newCol;
     }
 
     let maxId = 0;
@@ -621,7 +625,8 @@
     // 使用するヘッダの最大列に合わせて行配列を確保 (title 列が末尾にあるケースに対応)
     const maxCol = Math.max(
       hi.id, hi.date, hi.script_ja, hi.script_en,
-      (hi.title != null ? hi.title : -1)
+      (hi.title != null ? hi.title : -1),
+      (hi.explanation != null ? hi.explanation : -1)
     );
     const row = new Array(maxCol + 1).fill("");
     row[hi.id]        = nextId;
@@ -630,6 +635,9 @@
     row[hi.script_en] = String((entry && entry.script_en) || "");
     if (hi.title != null && hi.title >= 0) {
       row[hi.title]   = String((entry && entry.title) || "");
+    }
+    if (hi.explanation != null && hi.explanation >= 0) {
+      row[hi.explanation] = String((entry && entry.explanation) || "");
     }
 
     const url = "https://sheets.googleapis.com/v4/spreadsheets/" +
@@ -878,7 +886,7 @@
   // ----------------------------------------------------
   // diary シート全件読み込み（本文確認・音声DL用）
   // ----------------------------------------------------
-  // 戻り値: { rows: [{id, date, title, scriptJa, scriptEn, downloadedAt, rowIndex}], headerIndex, rowIndexById, exists }
+  // 戻り値: { rows: [{id, date, title, scriptJa, scriptEn, explanation, downloadedAt, rowIndex}], headerIndex, rowIndexById, exists }
   // headerIndex.audio_downloaded_at は列が無ければ -1
   // シート/タブが無い場合は { rows: [], exists: false } を返す
   async function loadDiary(spreadsheetId) {
@@ -904,7 +912,7 @@
     }
 
     const headers = values[0].map(function (h) { return String(h).trim(); });
-    const headerIndex = { id: -1, date: -1, title: -1, script_ja: -1, script_en: -1, audio_downloaded_at: -1 };
+    const headerIndex = { id: -1, date: -1, title: -1, script_ja: -1, script_en: -1, explanation: -1, audio_downloaded_at: -1 };
     headers.forEach(function (h, i) { if (h in headerIndex) headerIndex[h] = i; });
     const required = ["id", "script_ja", "script_en"];
     const missing = required.filter(function (h) { return headerIndex[h] < 0; });
@@ -925,6 +933,7 @@
       if (!scriptJa && !scriptEn) continue;
       const date = headerIndex.date >= 0 ? String(row[headerIndex.date] || "").trim() : "";
       const title = headerIndex.title >= 0 ? String(row[headerIndex.title] || "").trim() : "";
+      const explanation = headerIndex.explanation >= 0 ? String(row[headerIndex.explanation] || "").trim() : "";
       const downloadedAt = headerIndex.audio_downloaded_at >= 0
         ? String(row[headerIndex.audio_downloaded_at] || "").trim()
         : "";
@@ -934,6 +943,7 @@
         title: title,
         scriptJa: scriptJa,
         scriptEn: scriptEn,
+        explanation: explanation,
         downloadedAt: downloadedAt,
         rowIndex: r + 1
       });
@@ -956,7 +966,7 @@
     // headerIndex が無い場合のフォールバックは D(3) の次 = E(4)。
     let maxCol = -1;
     if (headerIndex) {
-      ["id", "date", "title", "script_ja", "script_en"].forEach(function (k) {
+      ["id", "date", "title", "script_ja", "script_en", "explanation"].forEach(function (k) {
         if (headerIndex[k] != null && headerIndex[k] > maxCol) maxCol = headerIndex[k];
       });
     }
