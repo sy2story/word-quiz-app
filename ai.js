@@ -129,8 +129,9 @@
   }
 
   // 英語音声 (TTS) を生成。Gemini 2.5 Flash TTS の生 PCM を base64 で受け取る。
+  // voice: "female" / "male" (サーバ側で許可リストの音声に解決)。
   // 戻り値: { success, audioBase64, mimeType, sampleRate, ttsRemaining } / 失敗時 { success:false, error, code }
-  async function generateTts(text) {
+  async function generateTts(text, voice) {
     if (!isEnabled()) {
       return { success: false, error: "AI_PROXY_URL が設定されていません。", code: "NOT_CONFIGURED" };
     }
@@ -159,9 +160,10 @@
     state.ttsInFlight = true;
     try {
       // 翻訳と同じく text/plain で送って preflight を回避する。
+      const voiceKey = (voice === "male") ? "male" : "female";
       const res = await fetch(window.AI_PROXY_URL, {
         method: "POST",
-        body: JSON.stringify({ action: "tts", text: text, accessToken: accessToken }),
+        body: JSON.stringify({ action: "tts", text: text, voice: voiceKey, accessToken: accessToken }),
         redirect: "follow"
       });
 

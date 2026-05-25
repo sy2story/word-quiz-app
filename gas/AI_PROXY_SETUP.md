@@ -117,12 +117,16 @@ TTS 用の上限・声は `gas/AiProxy.gs` 冒頭で調整して再デプロイ:
 
 ```js
 const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
-const TTS_VOICE_NAME = "Aoede";        // 30 種から選択 (Zephyr/Puck/Kore/Aoede ...)
-const DAILY_TTS_LIMIT_PER_USER = 5;    // 1 ユーザ / 1 日の音声ダウンロード回数
+// フロントは voice="female"/"male" を送り、サーバ側で許可リストの声に解決する
+const TTS_VOICES = { female: "Aoede", male: "Orus" };  // 30 種から割当 (Zephyr/Puck/Kore/Aoede/Orus ...)
+const TTS_DEFAULT_VOICE = "female";    // 未知の voice はこの声にフォールバック
+const DAILY_TTS_LIMIT_PER_USER = 3;    // 1 ユーザ / 1 日の音声ダウンロード回数
 const GLOBAL_TTS_DAILY_LIMIT = 300;    // サービス全体 / 1 日
 const MAX_TTS_CHARS = 2000;            // 音声化する英文の最大文字数
 ```
 
+> 声は詳細ページの「女性 / 男性」トグルで選ぶ (既定は女性=Aoede)。男性=Orus。
+> 別の声に変えたい場合は `TTS_VOICES` の値を 30 種のいずれかに差し替えて再デプロイ。
 > ダウンロードファイルは **WAV** (Gemini TTS が返すのは生 PCM のみで MP3 は非対応のため)。
 > WAV は非圧縮なので長文ほどファイルが大きい (24kHz/16bit ≒ 48KB/秒)。
 

@@ -371,6 +371,21 @@
           ⬇️ 英語音声をダウンロード
         </button>
       </div>
+
+      <!-- 音声の声 (ダウンロードする Gemini 音声に反映) -->
+      <div id="diary-voice-row" class="flex items-center gap-2 mb-2">
+        <span class="text-xs text-slate-500 shrink-0">音声</span>
+        <div class="inline-flex rounded-lg border border-slate-300 overflow-hidden" role="group" aria-label="音声の声を選択">
+          <button id="diary-voice-female" type="button" data-voice="female"
+            class="text-sm font-medium px-3 py-1.5 disabled:cursor-not-allowed">
+            👩 女性
+          </button>
+          <button id="diary-voice-male" type="button" data-voice="male"
+            class="text-sm font-medium px-3 py-1.5 border-l border-slate-300 disabled:cursor-not-allowed">
+            👨 男性
+          </button>
+        </div>
+      </div>
       <p id="diary-download-note" class="text-xs text-slate-500 mb-4 hidden">-</p>
       <div id="diary-detail-error" class="hidden bg-red-50 border border-red-200 text-red-700 text-xs rounded-md p-2 mb-4"></div>
 

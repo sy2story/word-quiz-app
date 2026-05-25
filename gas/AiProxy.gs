@@ -26,7 +26,10 @@ const GEMINI_MODEL = "gemini-3.1-flash-lite";
 
 // TTS (英語音声ダウンロード) 用。翻訳とは別枠でコストを管理する。
 const GEMINI_TTS_MODEL = "gemini-2.5-flash-preview-tts";
-const TTS_VOICE_NAME = "Aoede";           // 30 種から選択 (Zephyr/Puck/Kore/Aoede ...)
+// フロントは voice = "female" / "male" を送る。サーバ側で許可リストの声に解決する
+// (任意の voiceName 注入を防ぐ)。30 種から選択可: Zephyr/Puck/Kore/Aoede/Orus ...
+const TTS_VOICES = { female: "Aoede", male: "Orus" };
+const TTS_DEFAULT_VOICE = "female";
 const DAILY_TTS_LIMIT_PER_USER = 3;       // (A') 1 ユーザ / 1 日
 const GLOBAL_TTS_DAILY_LIMIT = 300;       // (C') 全ユーザ合計 / 1 日
 const MAX_TTS_CHARS = 2000;               // TTS の入力上限 (英訳本文)
@@ -55,7 +58,7 @@ function doPost(e) {
 
     // 英語音声ダウンロード (TTS)。翻訳とは入力上限・クォータが別。
     if (action === "tts") {
-      return handleTts(accessToken, text);
+      return handleTts(accessToken, text, payload.voice);
     }
 
     if (text.length > MAX_INPUT_CHARS) {
@@ -241,7 +244,7 @@ function refundRateLimits(email) {
 // ------------------------------------------------------------
 // TTS (英語音声ダウンロード)
 // ------------------------------------------------------------
-function handleTts(accessToken, text) {
+function handleTts(accessToken, text, voice) {
   if (text.length > MAX_TTS_CHARS) {
     return jsonResponse({
       success: false,
@@ -249,6 +252,10 @@ function handleTts(accessToken, text) {
       code: "INPUT_TOO_LONG"
     });
   }
+
+  // voice は許可リスト ("female"/"male") のみ受理。未知の値は既定にフォールバック。
+  const voiceKey = TTS_VOICES[String(voice || "")] ? String(voice) : TTS_DEFAULT_VOICE;
+  const voiceName = TTS_VOICES[voiceKey];
 
   const auth = verifyAccessToken(accessToken);
   if (!auth.ok) {
@@ -265,7 +272,7 @@ function handleTts(accessToken, text) {
     });
   }
 
-  const result = callGeminiTts(text);
+  const result = callGeminiTts(text, voiceName);
   if (!result.ok) {
     refundTtsLimit(auth.email);   // 失敗時はカウンタ返金
     return jsonResponse({ success: false, error: result.error, code: "TTS_FAILED" });
@@ -339,12 +346,14 @@ function refundTtsLimit(email) {
 }
 
 // Gemini 2.5 Flash TTS を呼び、生 PCM (16bit/24kHz/mono) を base64 で返す。
+// voiceName は解決済みの音声名 (例 "Aoede"/"Orus")。
 // 戻り値: { ok:true, audioBase64, mimeType, sampleRate } | { ok:false, error }
-function callGeminiTts(text) {
+function callGeminiTts(text, voiceName) {
   const apiKey = PropertiesService.getScriptProperties().getProperty("GEMINI_API_KEY");
   if (!apiKey) {
     return { ok: false, error: "サーバー側で GEMINI_API_KEY が未設定です。" };
   }
+  const voice = voiceName || TTS_VOICES[TTS_DEFAULT_VOICE];
 
   // スタイル指示はテキスト先頭に自然言語で付与する (Gemini TTS の流儀)。
   const prompt =
@@ -357,7 +366,7 @@ function callGeminiTts(text) {
       responseModalities: ["AUDIO"],
       speechConfig: {
         voiceConfig: {
-          prebuiltVoiceConfig: { voiceName: TTS_VOICE_NAME }
+          prebuiltVoiceConfig: { voiceName: voice }
         }
       }
     }

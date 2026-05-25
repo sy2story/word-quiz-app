@@ -38,7 +38,8 @@
     sentences: null,   // スピーキング練習用 sentence シートのキャッシュ。{ rows, ctx } / null は未ロード
     speak: null,       // { diaryId, items[], index, revealed: bool, sentenceCtx, startedAt }
     diary: null,       // 日記確認用 diary シートのキャッシュ。{ rows, headerIndex, rowIndexById, exists } / null は未ロード
-    diaryCurrent: null // 詳細表示中の diary 行 (state.diary.rows の要素への参照)
+    diaryCurrent: null, // 詳細表示中の diary 行 (state.diary.rows の要素への参照)
+    ttsVoice: "female"  // DL する音声の声 "female"/"male" (localStorage に永続化)
   };
 
   // ====================================================
@@ -1373,6 +1374,37 @@
       note.textContent = "ダウンロードは1エントリにつき1回までです。";
       note.classList.remove("hidden");
     }
+    renderVoiceToggle();
+  }
+
+  // 音声の声トグル（女性/男性）の表示更新。DL済みなら変更不可。
+  function renderVoiceToggle() {
+    const row = document.getElementById("diary-voice-row");
+    const fBtn = document.getElementById("diary-voice-female");
+    const mBtn = document.getElementById("diary-voice-male");
+    if (!fBtn || !mBtn) return;
+    const sel = (state.ttsVoice === "male") ? "male" : "female";
+    [["female", fBtn], ["male", mBtn]].forEach(function (pair) {
+      const on = pair[0] === sel;
+      const btn = pair[1];
+      btn.classList.toggle("bg-blue-600", on);
+      btn.classList.toggle("text-white", on);
+      btn.classList.toggle("bg-white", !on);
+      btn.classList.toggle("text-slate-600", !on);
+      btn.setAttribute("aria-pressed", on ? "true" : "false");
+    });
+    const downloaded = !!(state.diaryCurrent && state.diaryCurrent.downloadedAt);
+    fBtn.disabled = downloaded;
+    mBtn.disabled = downloaded;
+    if (row) row.classList.toggle("opacity-50", downloaded);
+  }
+
+  function setTtsVoice(voice) {
+    // DL済みエントリでは変更させない
+    if (state.diaryCurrent && state.diaryCurrent.downloadedAt) return;
+    state.ttsVoice = (voice === "male") ? "male" : "female";
+    lsSet("wq_tts_voice", state.ttsVoice);
+    renderVoiceToggle();
   }
 
   // base64 PCM(16bit LE/mono) → WAV Blob
@@ -1432,7 +1464,7 @@
     btn.textContent = "🔄 音声を生成中…";
 
     try {
-      const res = await window.WQAi.generateTts(row.scriptEn);
+      const res = await window.WQAi.generateTts(row.scriptEn, state.ttsVoice);
       if (!res.success) {
         diaryDetailError(res.error || "音声生成に失敗しました。");
         updateDiaryDownloadBtn();
@@ -1768,6 +1800,13 @@
     if (diaryPlayBtn) diaryPlayBtn.addEventListener("click", playDiaryEn);
     const diaryDownloadBtn = document.getElementById("diary-download-btn");
     if (diaryDownloadBtn) diaryDownloadBtn.addEventListener("click", downloadDiaryAudio);
+    const diaryVoiceFemale = document.getElementById("diary-voice-female");
+    if (diaryVoiceFemale) diaryVoiceFemale.addEventListener("click", () => setTtsVoice("female"));
+    const diaryVoiceMale = document.getElementById("diary-voice-male");
+    if (diaryVoiceMale) diaryVoiceMale.addEventListener("click", () => setTtsVoice("male"));
+
+    // 保存済みの音声の声を復元
+    state.ttsVoice = (lsGet("wq_tts_voice", "female") === "male") ? "male" : "female";
 
     // 初期 UI
     updateConnectionUi();
