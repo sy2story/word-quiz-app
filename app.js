@@ -310,6 +310,58 @@
     }
   }
 
+  // ランダムクイズ用: 既存統計 + randam_quiz_* 列を書き込む。
+  async function recordRandomAnswerToSheet(word, result, answeredAt) {
+    if (!state.spreadsheetId || !state.sheetCtx) {
+      console.warn("recordRandomAnswer skipped: sheet not loaded");
+      return null;
+    }
+
+    let built;
+    try {
+      built = window.WQSheets.buildRandomQuizCells(word, result, state.sheetCtx, answeredAt);
+    } catch (err) {
+      console.warn("buildRandomQuizCells failed:", err);
+      return null;
+    }
+
+    try {
+      await window.WQSheets.writeCells(state.spreadsheetId, built.cells);
+      return built;
+    } catch (err) {
+      console.warn("write failed, queueing for retry:", err);
+      addPendingLog({
+        spreadsheetId: state.spreadsheetId,
+        cells: built.cells,
+        queuedAt: new Date().toISOString()
+      });
+      return null;
+    }
+  }
+
+  // 「今後出題しない」: randam_quiz_is_finished=true だけ書き込む。
+  async function recordExcludeFromRandomQuiz(word) {
+    if (!state.spreadsheetId || !state.sheetCtx) return;
+    let built;
+    try {
+      built = window.WQSheets.buildExcludeFromRandomQuizCells(word, state.sheetCtx);
+    } catch (err) {
+      console.warn("buildExcludeFromRandomQuizCells failed:", err);
+      return;
+    }
+    if (!built.cells || built.cells.length === 0) return;
+    try {
+      await window.WQSheets.writeCells(state.spreadsheetId, built.cells);
+    } catch (err) {
+      console.warn("write failed, queueing for retry:", err);
+      addPendingLog({
+        spreadsheetId: state.spreadsheetId,
+        cells: built.cells,
+        queuedAt: new Date().toISOString()
+      });
+    }
+  }
+
   async function retryPendingLogs() {
     if (!window.WQAuth || !window.WQAuth.isSignedIn()) return;
 
@@ -549,6 +601,13 @@
     document.getElementById("input-area").classList.add("hidden");
     document.getElementById("answer-area").classList.remove("hidden");
 
+    // 「今後出題しない」ボタンはランダムクイズのときだけ表示
+    const excludeBtn = document.getElementById("exclude-btn");
+    if (excludeBtn) {
+      if (state.quiz.mode === "random") excludeBtn.classList.remove("hidden");
+      else excludeBtn.classList.add("hidden");
+    }
+
     // LocalStorage更新
     if (result === "wrong") {
       addWeakId(word.id);
@@ -560,17 +619,37 @@
     lsSet(STORAGE_KEYS.lastStudiedAt, answeredAt);
 
     // バックグラウンドで Sheets API に書き込み
-    recordAnswerToSheet(word, result, answeredAt).then(next => {
-      if (next) {
-        // ローカル状態を最新値で同期
-        word.correctCount = next.correct_count;
-        word.wrongCount = next.wrong_count;
-        word.lastResult = next.last_result;
-        word.lastAnsweredAt = next.last_answered_at;
-        word.isWeak = next.is_weak;
-        word.consecutiveCorrectCount = next.consecutive_correct_count;
-      }
-    });
+    if (state.quiz.mode === "random") {
+      recordRandomAnswerToSheet(word, result, answeredAt).then(built => {
+        if (built) {
+          // ローカル状態を最新値で同期（既存統計 + randam_quiz_*）
+          word.correctCount = built.next.correct_count;
+          word.wrongCount = built.next.wrong_count;
+          word.lastResult = built.next.last_result;
+          word.lastAnsweredAt = built.next.last_answered_at;
+          word.isWeak = built.next.is_weak;
+          word.consecutiveCorrectCount = built.next.consecutive_correct_count;
+          word.randamQuizLastAnsweredAt = built.randamNext.randam_quiz_last_answered_at;
+          word.randamQuizCount = built.randamNext.randam_quiz_count;
+          word.randamQuizIsFinished = built.randamNext.randam_quiz_is_finished;
+          if (built.randamNext.randam_quiz_next_date_at != null) {
+            word.randamQuizNextDateAt = built.randamNext.randam_quiz_next_date_at;
+          }
+        }
+      });
+    } else {
+      recordAnswerToSheet(word, result, answeredAt).then(next => {
+        if (next) {
+          // ローカル状態を最新値で同期
+          word.correctCount = next.correct_count;
+          word.wrongCount = next.wrong_count;
+          word.lastResult = next.last_result;
+          word.lastAnsweredAt = next.last_answered_at;
+          word.isWeak = next.is_weak;
+          word.consecutiveCorrectCount = next.consecutive_correct_count;
+        }
+      });
+    }
   }
 
   function advanceQuestion() {
@@ -587,10 +666,15 @@
     document.getElementById("answer-area").classList.add("hidden");
     document.getElementById("quiz-card").classList.add("hidden");
 
-    const remainingWeak = state.quiz.words.filter(isWordWeak).length;
-    const text = remainingWeak === 0
-      ? "全問おつかれさまでした！このセクションは苦手0です ✨"
-      : "おつかれさまでした！残り苦手: " + remainingWeak + "問";
+    let text;
+    if (state.quiz.mode === "random") {
+      text = "おつかれさまでした！ランダム復習 " + state.quiz.words.length + "問が完了しました ✨";
+    } else {
+      const remainingWeak = state.quiz.words.filter(isWordWeak).length;
+      text = remainingWeak === 0
+        ? "全問おつかれさまでした！このセクションは苦手0です ✨"
+        : "おつかれさまでした！残り苦手: " + remainingWeak + "問";
+    }
     document.getElementById("quiz-summary-text").textContent = text;
     document.getElementById("quiz-summary").classList.remove("hidden");
   }
@@ -600,6 +684,62 @@
     document.getElementById("quiz-screen").hidden = true;
     document.getElementById("home-screen").hidden = false;
     renderHome();
+  }
+
+  // ====================================================
+  // ランダムクイズ（間隔反復）
+  // ====================================================
+  const RANDOM_QUIZ_SIZE = 10;
+
+  // 出題プール: wrong_count>=1 かつ 未打ち切り かつ 次回出題日時が空または現在以前。
+  function buildRandomQuizPool() {
+    const now = Date.now();
+    const eligible = state.words.filter(function (w) {
+      if (!(w.wrongCount >= 1)) return false;
+      if (w.randamQuizIsFinished === true) return false;
+      const next = w.randamQuizNextDateAt;
+      if (!next) return true; // 空 = 即出題対象
+      const t = new Date(next).getTime();
+      return !Number.isFinite(t) || t <= now;
+    });
+    // シャッフル（Fisher-Yates）してから先頭 RANDOM_QUIZ_SIZE 件
+    for (let i = eligible.length - 1; i > 0; i--) {
+      const j = Math.floor(Math.random() * (i + 1));
+      const tmp = eligible[i]; eligible[i] = eligible[j]; eligible[j] = tmp;
+    }
+    return eligible.slice(0, RANDOM_QUIZ_SIZE);
+  }
+
+  function startRandomQuiz() {
+    if (!state.spreadsheetId) {
+      showError("スプレッドシートに接続してください。");
+      return;
+    }
+    const pool = buildRandomQuizPool();
+    if (pool.length === 0) {
+      alert("出題できる単語がありません。間違えた単語が貯まると、ここで復習できます。");
+      return;
+    }
+    state.quiz = {
+      sectionId: null,
+      mode: "random",
+      words: pool,
+      index: 0,
+      answered: false
+    };
+    document.getElementById("home-screen").hidden = true;
+    document.getElementById("quiz-screen").hidden = false;
+    document.getElementById("quiz-summary").classList.add("hidden");
+    document.getElementById("quiz-card").classList.remove("hidden");
+    renderQuiz();
+  }
+
+  function excludeFromRandomQuiz() {
+    if (!state.quiz || state.quiz.mode !== "random" || !state.quiz.answered) return;
+    const word = state.quiz.words[state.quiz.index];
+    word.randamQuizIsFinished = true;
+    recordExcludeFromRandomQuiz(word);
+    advanceQuestion();
   }
 
   // ====================================================
@@ -1210,6 +1350,14 @@
     else card.classList.add("hidden");
   }
 
+  function showRandomQuizCardIfReady() {
+    const card = document.getElementById("random-quiz-card");
+    if (!card) return;
+    const ready = state.signedIn && state.spreadsheetId && !state.loadError;
+    if (ready) card.classList.remove("hidden");
+    else card.classList.add("hidden");
+  }
+
   async function openDiaryList() {
     if (!state.spreadsheetId) {
       showError("スプレッドシートに接続してください。");
@@ -1566,6 +1714,7 @@
       showAiCardIfReady();
       showSpeakCardIfReady();
       showDiaryCardIfReady();
+      showRandomQuizCardIfReady();
       return;
     }
 
@@ -1576,6 +1725,7 @@
       showAiCardIfReady();
       showSpeakCardIfReady();
       showDiaryCardIfReady();
+      showRandomQuizCardIfReady();
       return;
     }
 
@@ -1600,6 +1750,7 @@
       showAiCardIfReady();
       showSpeakCardIfReady();
       showDiaryCardIfReady();
+      showRandomQuizCardIfReady();
       return;
     }
 
@@ -1756,6 +1907,10 @@
     });
     document.getElementById("skip-btn").addEventListener("click", skipAnswer);
     document.getElementById("next-btn").addEventListener("click", advanceQuestion);
+    const excludeBtn = document.getElementById("exclude-btn");
+    if (excludeBtn) excludeBtn.addEventListener("click", excludeFromRandomQuiz);
+    const randomQuizOpenBtn = document.getElementById("random-quiz-open-btn");
+    if (randomQuizOpenBtn) randomQuizOpenBtn.addEventListener("click", startRandomQuiz);
 
     document.getElementById("speak-phrase-btn").addEventListener("click", () => {
       if (!state.quiz) return;

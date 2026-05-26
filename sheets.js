@@ -6,7 +6,13 @@
   "use strict";
 
   const SHEET_NAME = "words";
-  const READ_RANGE = SHEET_NAME + "!A1:O5000";
+  const READ_RANGE = SHEET_NAME + "!A1:S5000";
+
+  // ランダムクイズ（間隔反復）の出題間隔。
+  // 出題後の randam_quiz_count の値 → 最終解答日時に加算する日数。
+  const RANDOM_QUIZ_INTERVAL_DAYS = { 1: 4, 2: 7, 3: 16, 4: 39, 5: 51, 6: 60 };
+  // この回数に達したら出題を打ち切る（is_finished=true）。
+  const RANDOM_QUIZ_FINISH_COUNT = 7;
 
   // 列名 → 内部キー（GAS の COLUMN_MAP と同じ）
   const HEADER_TO_KEY = {
@@ -24,7 +30,11 @@
     "last_result": "lastResult",
     "last_answered_at": "lastAnsweredAt",
     "is_weak": "isWeak",
-    "consecutive_correct_count": "consecutiveCorrectCount"
+    "consecutive_correct_count": "consecutiveCorrectCount",
+    "randam_quiz_last_answered_at": "randamQuizLastAnsweredAt",
+    "randam_quiz_count": "randamQuizCount",
+    "randam_quiz_next_date_at": "randamQuizNextDateAt",
+    "randam_quiz_is_finished": "randamQuizIsFinished"
   };
 
   // ----------------------------------------------------
@@ -177,8 +187,19 @@
           : String(raw.last_answered_at).trim())
         : "",
       isWeak: toBoolean(raw.is_weak),
-      consecutiveCorrectCount: toNumber(raw.consecutive_correct_count)
+      consecutiveCorrectCount: toNumber(raw.consecutive_correct_count),
+      randamQuizLastAnsweredAt: normalizeDateStr(raw.randam_quiz_last_answered_at),
+      randamQuizCount: toNumber(raw.randam_quiz_count),
+      randamQuizNextDateAt: normalizeDateStr(raw.randam_quiz_next_date_at),
+      randamQuizIsFinished: toBoolean(raw.randam_quiz_is_finished)
     };
+  }
+
+  // Date / ISO 文字列 / 空 を ISO 文字列（または ""）に正規化する。
+  function normalizeDateStr(v) {
+    if (!v) return "";
+    if (v instanceof Date) return v.toISOString();
+    return String(v).trim();
   }
 
   // ----------------------------------------------------
@@ -299,6 +320,61 @@
   }
 
   // ----------------------------------------------------
+  // ランダムクイズ回答の書き込みセル組み立て
+  // ----------------------------------------------------
+  // 既存統計列（buildAnswerCells と同じ）に加え、間隔反復用の randam_quiz_* 列も更新する。
+  // 出題回数は正解・不正解に関わらず +1 し、出題後カウントに応じて次回出題日時を決める。
+  // 戻り値: { cells, next, randamNext }（randamNext はローカル word 同期用）
+  function buildRandomQuizCells(word, result, ctx, answeredAt) {
+    const built = buildAnswerCells(word, result, ctx, answeredAt);
+    const now = built.next.last_answered_at; // ISO 文字列（buildAnswerCells が確定済み）
+    const newCount = toNumber(word.randamQuizCount) + 1;
+    const finished = newCount >= RANDOM_QUIZ_FINISH_COUNT;
+
+    const randamNext = {
+      randam_quiz_last_answered_at: now,
+      randam_quiz_count: newCount,
+      randam_quiz_is_finished: finished
+    };
+    // 打ち切り時は次回出題日時を更新しない（既存値を保持）。
+    if (!finished) {
+      const days = RANDOM_QUIZ_INTERVAL_DAYS[newCount] || 0;
+      randamNext.randam_quiz_next_date_at = addDaysIso(now, days);
+    }
+
+    Object.keys(randamNext).forEach(headerName => {
+      const colIdx = ctx.headerIndex[headerName];
+      if (colIdx == null || colIdx < 0) return;
+      built.cells.push({
+        range: SHEET_NAME + "!" + colLetter(colIdx) + ctx.rowIndexById[word.id],
+        value: randamNext[headerName]
+      });
+    });
+
+    return { cells: built.cells, next: built.next, randamNext: randamNext };
+  }
+
+  function addDaysIso(iso, days) {
+    const base = iso ? new Date(iso) : new Date();
+    const t = base.getTime();
+    return new Date((Number.isFinite(t) ? t : Date.now()) + days * 86400000).toISOString();
+  }
+
+  // 単語の「今後出題しない」フラグだけを書き込むセルを組み立てる。
+  function buildExcludeFromRandomQuizCells(word, ctx) {
+    const rowIdx = ctx.rowIndexById[word.id];
+    if (!rowIdx) throw new Error("word not found in sheet: " + word.id);
+    const colIdx = ctx.headerIndex["randam_quiz_is_finished"];
+    if (colIdx == null || colIdx < 0) return { cells: [] };
+    return {
+      cells: [{
+        range: SHEET_NAME + "!" + colLetter(colIdx) + rowIdx,
+        value: true
+      }]
+    };
+  }
+
+  // ----------------------------------------------------
   // 新規語の追加 (AI 抽出機能用)
   // ----------------------------------------------------
   // items: [{ word, meaning_ja, phrase_en, phrase_ja, example_en?, example_ja? }]
@@ -343,6 +419,11 @@
       put("last_answered_at", "");
       put("is_weak", false);
       put("consecutive_correct_count", 0);
+      // ランダムクイズ: 登録日時を次回出題日時の初期値に設定（wrong_count>=1 になり次第すぐ対象になる）
+      put("randam_quiz_last_answered_at", "");
+      put("randam_quiz_count", 0);
+      put("randam_quiz_next_date_at", new Date().toISOString());
+      put("randam_quiz_is_finished", false);
       return row;
     });
 
@@ -379,7 +460,9 @@
       "id", "word", "meaning_ja", "phrase_en", "phrase_ja",
       "example_en", "example_ja", "section", "enabled",
       "correct_count", "wrong_count", "last_result", "last_answered_at",
-      "is_weak", "consecutive_correct_count"
+      "is_weak", "consecutive_correct_count",
+      "randam_quiz_last_answered_at", "randam_quiz_count",
+      "randam_quiz_next_date_at", "randam_quiz_is_finished"
     ];
 
     // 1) シート一覧を取得
@@ -421,7 +504,7 @@
     if (!created) {
       const checkUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
         encodeURIComponent(spreadsheetId) +
-        "/values/" + encodeURIComponent(SHEET_NAME + "!A1:O1");
+        "/values/" + encodeURIComponent(SHEET_NAME + "!A1:S1");
       const checkRes = await authedFetch(checkUrl, { method: "GET" });
       if (!checkRes.ok) {
         const errBody = await safeJson(checkRes);
@@ -438,7 +521,7 @@
     if (headerEmpty) {
       const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
         encodeURIComponent(spreadsheetId) +
-        "/values/" + encodeURIComponent(SHEET_NAME + "!A1:O1") +
+        "/values/" + encodeURIComponent(SHEET_NAME + "!A1:S1") +
         "?valueInputOption=RAW";
       const headerRes = await authedFetch(headerUrl, {
         method: "PUT",
@@ -459,7 +542,7 @@
   // 新規スプレッドシート作成
   // ----------------------------------------------------
   // - Sheets API で新しいスプレッドシートを作成し、最初のタブを "words" にする
-  // - 続けて ensureWordsSheet を呼び、ヘッダ 15 列を書き込む
+  // - 続けて ensureWordsSheet を呼び、ヘッダ 19 列を書き込む
   // - drive.file スコープでもアプリ作成ファイルはアクセス可
   // 戻り値: { id, name, url }
   async function createSpreadsheet(name) {
@@ -1020,6 +1103,8 @@
     recordAnswer: recordAnswer,
     writeCells: writeCells,
     buildAnswerCells: buildAnswerCells,
+    buildRandomQuizCells: buildRandomQuizCells,
+    buildExcludeFromRandomQuizCells: buildExcludeFromRandomQuizCells,
     appendWords: appendWords,
     ensureWordsSheet: ensureWordsSheet,
     createSpreadsheet: createSpreadsheet,

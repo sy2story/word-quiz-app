@@ -150,6 +150,20 @@
         </div>
       </div>
 
+      <!-- ランダムクイズカード (シート接続済のときだけ表示) -->
+      <div id="random-quiz-card" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4">
+        <div class="flex items-start justify-between gap-3 mb-2">
+          <div class="min-w-0">
+            <p class="text-sm font-semibold">間違えた単語をランダム復習</p>
+            <p class="text-xs text-slate-500 mt-0.5">一度間違えた単語から最大10問を出題し、間隔をあけて繰り返し復習します</p>
+          </div>
+          <button id="random-quiz-open-btn" type="button"
+            class="shrink-0 bg-blue-600 hover:bg-blue-700 text-white text-sm font-medium px-3 py-1.5 rounded-lg">
+            開く
+          </button>
+        </div>
+      </div>
+
       <!-- スピーキング練習カード (シート接続済のときだけ表示) -->
       <div id="speak-card" class="hidden bg-white rounded-xl shadow-sm p-4 mb-4">
         <div class="flex items-start justify-between gap-3 mb-2">
@@ -240,6 +254,13 @@
         <button id="next-btn" type="button" class="w-full bg-blue-600 hover:bg-blue-700 text-white font-semibold py-3 rounded-lg mt-2">
           次へ
         </button>
+
+        <!-- ランダムクイズ時のみ表示 -->
+        <div class="text-center">
+          <button id="exclude-btn" type="button" class="hidden text-sm text-slate-500 underline">
+            今後出題しない
+          </button>
+        </div>
       </div>
 
       <!-- クイズ終了画面 -->
