@@ -449,10 +449,10 @@ function callGemini(text) {
             meaning_ja: { type: "string", description: "文脈に合う簡潔な日本語訳。" },
             phrase_en:  { type: "string", description: "その単語を含む 2〜6 語程度の自然な英語フレーズ。" },
             phrase_ja:  { type: "string", description: "phrase_en の日本語訳。" },
-            example_en: { type: "string", description: "その単語を使った完結した英語の例文 1 文。" },
-            example_ja: { type: "string", description: "example_en の日本語訳 1 文。" }
+            example_en: { type: "string", description: "translation_en の中で、その単語が実際に使われている 1 文をそのまま（言い換え・要約なし）抜き出したもの。" },
+            example_ja: { type: "string", description: "example_en の文に対応する自然な日本語訳 1 文（可能なら sentences の対応する sentence_ja と揃える）。" }
           },
-          required: ["word", "meaning_ja", "phrase_en", "phrase_ja"]
+          required: ["word", "meaning_ja", "phrase_en", "phrase_ja", "example_en", "example_ja"]
         }
       },
       sentences: {
@@ -494,7 +494,7 @@ function callGemini(text) {
     "語彙抽出ルール:\n" +
     "- word は 1 単語の見出し語 (小文字)。固有名詞・数字・極めて基本的すぎる語 (the/is/and など) は避ける。\n" +
     "- phrase_en はその単語を含む短い自然な英語フレーズ (2〜6 語程度、文ではなく句)。\n" +
-    "- example_en / example_ja は文として完結する 1 文ずつ。\n" +
+    "- example_en は新しく作らず、translation_en の中でその単語が登場する 1 文をそのまま抜き出す。複数文に登場する場合は最も自然な 1 文を選ぶ。example_ja はその文の和訳。\n" +
     "- meaning_ja は文脈に合う簡潔な日本語訳。\n" +
     "- 重複する見出し語は出さない。\n\n" +
     "文分割ルール (sentences):\n" +

@@ -597,6 +597,24 @@
     document.getElementById("answer-word").textContent = word.word;
     document.getElementById("answer-phrase").textContent = built.complete;
 
+    // 例文（example_en / example_ja）の表示と「例文を聞く」ボタンの出し分け
+    const exBlock = document.getElementById("answer-example-block");
+    const speakBtns = document.getElementById("speak-buttons");
+    const exBtn = document.getElementById("speak-example-btn");
+    if (word.exampleEn) {
+      document.getElementById("answer-example-en").textContent = word.exampleEn;
+      const jaEl = document.getElementById("answer-example-ja");
+      jaEl.textContent = word.exampleJa || "";
+      jaEl.classList.toggle("hidden", !word.exampleJa);
+      exBlock.classList.remove("hidden");
+      exBtn.classList.remove("hidden");
+      speakBtns.className = "grid grid-cols-3 gap-2";
+    } else {
+      exBlock.classList.add("hidden");
+      exBtn.classList.add("hidden");
+      speakBtns.className = "grid grid-cols-2 gap-2";
+    }
+
     state.quiz.answered = true;
     document.getElementById("input-area").classList.add("hidden");
     document.getElementById("answer-area").classList.remove("hidden");
@@ -1913,6 +1931,11 @@
     const randomQuizOpenBtn = document.getElementById("random-quiz-open-btn");
     if (randomQuizOpenBtn) randomQuizOpenBtn.addEventListener("click", startRandomQuiz);
 
+    document.getElementById("speak-example-btn").addEventListener("click", () => {
+      if (!state.quiz) return;
+      const w = state.quiz.words[state.quiz.index];
+      if (w.exampleEn) speak(w.exampleEn);
+    });
     document.getElementById("speak-phrase-btn").addEventListener("click", () => {
       if (!state.quiz) return;
       const w = state.quiz.words[state.quiz.index];

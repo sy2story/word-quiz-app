@@ -240,13 +240,22 @@
 
           <p class="text-xs text-slate-500 mb-1">完成フレーズ</p>
           <p id="answer-phrase" class="text-base">-</p>
+
+          <div id="answer-example-block" class="mt-3 hidden">
+            <p class="text-xs text-slate-500 mb-1">例文</p>
+            <p id="answer-example-en" class="text-base">-</p>
+            <p id="answer-example-ja" class="text-sm text-slate-600 mt-1">-</p>
+          </div>
         </article>
 
-        <div id="speak-buttons" class="grid grid-cols-2 gap-2">
-          <button id="speak-phrase-btn" type="button" class="bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg">
+        <div id="speak-buttons" class="grid grid-cols-3 gap-2">
+          <button id="speak-example-btn" type="button" class="bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg text-sm">
+            🔊 例文を聞く
+          </button>
+          <button id="speak-phrase-btn" type="button" class="bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg text-sm">
             🔊 フレーズを聞く
           </button>
-          <button id="speak-word-btn" type="button" class="bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg">
+          <button id="speak-word-btn" type="button" class="bg-white border border-blue-200 text-blue-600 font-medium py-2 rounded-lg text-sm">
             🔊 単語を聞く
           </button>
         </div>
