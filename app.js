@@ -1758,6 +1758,7 @@
     showAiCardIfReady();
     showSpeakCardIfReady();
     showDiaryCardIfReady();
+    showRandomQuizCardIfReady();
   }
 
   async function handleSignIn() {
