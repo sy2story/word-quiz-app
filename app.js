@@ -1563,6 +1563,9 @@
       show(connectBanner);
       sectionsList.innerHTML = "";
       document.getElementById("last-updated").textContent = "Google に接続して開始してください";
+      showAiCardIfReady();
+      showSpeakCardIfReady();
+      showDiaryCardIfReady();
       return;
     }
 
@@ -1570,6 +1573,9 @@
       show(pickBanner);
       sectionsList.innerHTML = "";
       document.getElementById("last-updated").textContent = "シートを選択してください";
+      showAiCardIfReady();
+      showSpeakCardIfReady();
+      showDiaryCardIfReady();
       return;
     }
 
