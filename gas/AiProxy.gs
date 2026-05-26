@@ -445,11 +445,11 @@ function callGemini(text) {
         items: {
           type: "object",
           properties: {
-            word:       { type: "string", description: "見出し語 (英語・小文字・1語)。" },
+            word:       { type: "string", description: "見出し語 (英語・小文字)。基本は 1 語だが、イディオム・句動詞 (give up, look forward to など) はそのまま複数語で登録してよい。現在進行形などの -ing 形の動詞は ing を除いた原形 (running→run, making→make) で登録する。" },
             meaning_ja: { type: "string", description: "文脈に合う簡潔な日本語訳。" },
             phrase_en:  { type: "string", description: "その単語を含む 2〜6 語程度の自然な英語フレーズ。" },
             phrase_ja:  { type: "string", description: "phrase_en の日本語訳。" },
-            example_en: { type: "string", description: "translation_en の中で、その単語が実際に使われている 1 文をそのまま（言い換え・要約なし）抜き出したもの。" },
+            example_en: { type: "string", description: "translation_en の中で、その単語が実際に使われている 1 文をそのまま（言い換え・要約なし）抜き出したもの。and/but/because などの接続詞で複数の文・節がつながっている場合は、その単語を含む短い 1 文（節）だけを抜き出す。" },
             example_ja: { type: "string", description: "example_en の文に対応する自然な日本語訳 1 文（可能なら sentences の対応する sentence_ja と揃える）。" }
           },
           required: ["word", "meaning_ja", "phrase_en", "phrase_ja", "example_en", "example_ja"]
@@ -492,9 +492,9 @@ function callGemini(text) {
     "I have been reading a lot lately.\n" +
     "「最近読書をしています」は、最近始まった読書習慣が今も続いているという意味なので、現在完了進行形を使用しています。\n\n" +
     "語彙抽出ルール:\n" +
-    "- word は 1 単語の見出し語 (小文字)。固有名詞・数字・極めて基本的すぎる語 (the/is/and など) は避ける。\n" +
+    "- word は見出し語 (小文字)。基本は 1 単語だが、イディオム・句動詞 (give up, look forward to など) はそのまま複数語で登録してよい。現在進行形などの -ing 形の動詞は ing を除いた原形 (running→run, making→make) で登録する。固有名詞・数字・極めて基本的すぎる語 (the/is/and など) は避ける。\n" +
     "- phrase_en はその単語を含む短い自然な英語フレーズ (2〜6 語程度、文ではなく句)。\n" +
-    "- example_en は新しく作らず、translation_en の中でその単語が登場する 1 文をそのまま抜き出す。複数文に登場する場合は最も自然な 1 文を選ぶ。example_ja はその文の和訳。\n" +
+    "- example_en は新しく作らず、translation_en の中でその単語が登場する 1 文をそのまま抜き出す。複数文に登場する場合は最も自然な 1 文を選ぶ。and/but/because などの接続詞で複数の文・節がつながっている場合は、その単語を含む短い 1 文（節）だけを抜き出す。example_ja はその文の和訳。\n" +
     "- meaning_ja は文脈に合う簡潔な日本語訳。\n" +
     "- 重複する見出し語は出さない。\n\n" +
     "文分割ルール (sentences):\n" +
