@@ -1,4 +1,4 @@
-const CACHE_NAME = "word-quiz-app-v8";
+const CACHE_NAME = "word-quiz-app-v9";
 
 const STATIC_ASSETS = [
   "./",
@@ -65,9 +65,18 @@ self.addEventListener("fetch", event => {
     return;
   }
 
+  // ネットワーク優先: オンライン時は常に最新を取得し、取得成功時にキャッシュを更新する。
+  // ネットワーク失敗（オフライン）時のみキャッシュにフォールバックする。
   event.respondWith(
-    caches.match(event.request).then(cachedResponse => {
-      return cachedResponse || fetch(event.request);
-    })
+    fetch(event.request)
+      .then(networkResponse => {
+        // 正常応答のみキャッシュに保存（opaque/エラー応答は除外）
+        if (networkResponse && networkResponse.ok) {
+          const copy = networkResponse.clone();
+          caches.open(CACHE_NAME).then(cache => cache.put(event.request, copy));
+        }
+        return networkResponse;
+      })
+      .catch(() => caches.match(event.request))
   );
 });
