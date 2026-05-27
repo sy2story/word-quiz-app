@@ -1558,7 +1558,7 @@
       note.classList.remove("hidden");
     } else {
       btn.disabled = false;
-      btn.textContent = "⬇️ 英語音声をダウンロード";
+      btn.textContent = "⬇️ 音声をダウンロード";
       note.textContent = "ダウンロードは1エントリにつき1回までです。";
       note.classList.remove("hidden");
     }
