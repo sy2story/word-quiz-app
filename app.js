@@ -1676,8 +1676,28 @@
         return;
       }
 
-      // WAV を生成してダウンロード
+      // WAV を生成
       const blob = pcmBase64ToWavBlob(res.audioBase64, res.sampleRate || 24000);
+
+      // 先に diary シートへダウンロード時刻を記録（1回制限）。
+      // ブラウザのダウンロード発火（a.click）は直後の fetch をキャンセルして
+      // "Load failed" を招くことがあるため、Sheets への PUT を済ませてから DL する。
+      const ts = new Date().toISOString();
+      let recordFailed = null;
+      try {
+        const colIdx = await window.WQSheets.ensureDiaryDownloadColumn(
+          state.spreadsheetId, state.diary && state.diary.headerIndex
+        );
+        if (state.diary && state.diary.headerIndex) state.diary.headerIndex.audio_downloaded_at = colIdx;
+        await window.WQSheets.recordDiaryDownloaded(state.spreadsheetId, colIdx, row.rowIndex, ts);
+      } catch (recErr) {
+        console.error("recordDiaryDownloaded failed:", recErr);
+        recordFailed = recErr;
+      }
+      // 記録の成否によらずダウンロード自体は実行する。フラグも立てて再DLは抑止。
+      row.downloadedAt = ts;
+
+      // 最後にダウンロードを発火（以降に Sheets fetch を行わない）
       const url = URL.createObjectURL(blob);
       const a = document.createElement("a");
       a.href = url;
@@ -1688,20 +1708,8 @@
       document.body.removeChild(a);
       setTimeout(function () { URL.revokeObjectURL(url); }, 2000);
 
-      // diary シートにダウンロード時刻を記録（1回制限）
-      const ts = new Date().toISOString();
-      try {
-        const colIdx = await window.WQSheets.ensureDiaryDownloadColumn(
-          state.spreadsheetId, state.diary && state.diary.headerIndex
-        );
-        if (state.diary && state.diary.headerIndex) state.diary.headerIndex.audio_downloaded_at = colIdx;
-        await window.WQSheets.recordDiaryDownloaded(state.spreadsheetId, colIdx, row.rowIndex, ts);
-        row.downloadedAt = ts;
-      } catch (recErr) {
-        console.error("recordDiaryDownloaded failed:", recErr);
-        // 記録に失敗してもダウンロード自体は完了している。フラグだけ立てて再DLは抑止。
-        row.downloadedAt = ts;
-        diaryDetailError("音声はダウンロードしましたが、ダウンロード記録の保存に失敗しました: " + (recErr.message || recErr));
+      if (recordFailed) {
+        diaryDetailError("音声はダウンロードしましたが、ダウンロード記録の保存に失敗しました: " + (recordFailed.message || recordFailed));
       }
     } catch (err) {
       console.error("downloadDiaryAudio failed:", err);

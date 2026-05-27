@@ -90,11 +90,21 @@
     return res;
   }
 
-  function doFetch(url, options, token) {
+  // fetch 自体がネットワークレベルで reject するケース（Safari の
+  // "Load failed" / Chrome の "Failed to fetch"。ダウンロード発火直後の
+  // リクエストキャンセル等）に対し、300ms 待って 1 回だけ再試行する。
+  async function doFetch(url, options, token) {
     const headers = Object.assign({}, options.headers || {}, {
       Authorization: "Bearer " + token
     });
-    return fetch(url, Object.assign({}, options, { headers: headers }));
+    const req = Object.assign({}, options, { headers: headers });
+    try {
+      return await fetch(url, req);
+    } catch (err) {
+      if (!(err instanceof TypeError)) throw err;
+      await new Promise(function (r) { setTimeout(r, 300); });
+      return await fetch(url, req);
+    }
   }
 
   // ----------------------------------------------------
@@ -614,12 +624,12 @@
 
       const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
         encodeURIComponent(spreadsheetId) +
-        "/values/" + encodeURIComponent("diary!A1:F1") +
+        "/values/" + encodeURIComponent("diary!A1:G1") +
         "?valueInputOption=RAW";
       const headerRes = await authedFetch(headerUrl, {
         method: "PUT",
         headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ values: [["id", "date", "title", "script_ja", "script_en", "explanation"]] })
+        body: JSON.stringify({ values: [["id", "date", "title", "script_ja", "script_en", "explanation", "audio_downloaded_at"]] })
       });
       if (!headerRes.ok) {
         const errBody = await safeJson(headerRes);
@@ -641,7 +651,7 @@
     const readJson = await readRes.json();
     const values = readJson.values || [];
 
-    let headerIndex = { id: -1, date: -1, title: -1, script_ja: -1, script_en: -1, explanation: -1 };
+    let headerIndex = { id: -1, date: -1, title: -1, script_ja: -1, script_en: -1, explanation: -1, audio_downloaded_at: -1 };
     if (values.length > 0) {
       const headers = values[0].map(function (h) { return String(h).trim(); });
       headers.forEach(function (h, i) {
@@ -649,19 +659,18 @@
       });
     }
     // 既存ヘッダが揃っていなければ補正 (新規作成直後は問題なし)
-    if (headerIndex.id < 0) headerIndex = { id: 0, date: 1, title: 2, script_ja: 3, script_en: 4, explanation: 5 };
+    if (headerIndex.id < 0) headerIndex = { id: 0, date: 1, title: 2, script_ja: 3, script_en: 4, explanation: 5, audio_downloaded_at: 6 };
 
-    // 旧シートに無い任意列 (title / explanation) を末尾へ順に追加する。
-    // 追加のたびに最大列が増えるので、毎回 max を計算し直して衝突を防ぐ。
-    const optionalCols = ["title", "explanation"];
+    // 旧シートに無い任意列 (title / explanation / audio_downloaded_at) を末尾へ順に追加する。
+    // 新列位置は「既知キーの max」ではなく実ヘッダ行の幅を起点にする。
+    // 既知キーだけで判断すると、末尾にある未知列 (旧 audio_downloaded_at 等) を
+    // 上書きしてしまうため。追加成功ごとに幅を +1 する。
+    let headerWidth = (values[0] ? values[0].length : 0);
+    const optionalCols = ["title", "explanation", "audio_downloaded_at"];
     for (let ci = 0; ci < optionalCols.length; ci++) {
       const key = optionalCols[ci];
       if (headerIndex[key] >= 0) continue;
-      let maxCol = -1;
-      Object.keys(headerIndex).forEach(function (k) {
-        if (headerIndex[k] > maxCol) maxCol = headerIndex[k];
-      });
-      const newCol = (maxCol >= 0 ? maxCol : 3) + 1;
+      const newCol = headerWidth;
       const colHeaderUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
         encodeURIComponent(spreadsheetId) +
         "/values/" + encodeURIComponent("diary!" + colLetter(newCol) + "1") +
@@ -676,6 +685,7 @@
         throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + colRes.status));
       }
       headerIndex[key] = newCol;
+      headerWidth = newCol + 1;
     }
 
     let maxId = 0;
@@ -1020,6 +1030,11 @@
       const downloadedAt = headerIndex.audio_downloaded_at >= 0
         ? String(row[headerIndex.audio_downloaded_at] || "").trim()
         : "";
+      // 旧バグ (列追加時の上書き) で title/explanation に DL 日時の残骸が
+      // 入っている可能性。検知したら警告のみ出す（データは変更しない）。
+      if (/^\d{4}-\d\d-\d\dT/.test(title) || /^\d{4}-\d\d-\d\dT/.test(explanation)) {
+        console.warn("[diary] id=" + id + " (row " + (r + 1) + ") の title/explanation に ISO 日時らしき値が入っています。旧バグの残骸の可能性があるので手動確認してください。");
+      }
       rows.push({
         id: id,
         date: date,
@@ -1041,20 +1056,29 @@
   // ----------------------------------------------------
   async function ensureDiaryDownloadColumn(spreadsheetId, headerIndex) {
     if (!spreadsheetId) throw new Error("spreadsheetId is required.");
-    if (headerIndex && headerIndex.audio_downloaded_at >= 0) {
-      return headerIndex.audio_downloaded_at;
-    }
-    // 既存の最大列インデックス（既知ヘッダの最大値）の次に置く。
-    // title 列も含めて走査しないと、末尾に追加された title を上書きしてしまう。
-    // headerIndex が無い場合のフォールバックは D(3) の次 = E(4)。
-    let maxCol = -1;
-    if (headerIndex) {
-      ["id", "date", "title", "script_ja", "script_en", "explanation"].forEach(function (k) {
-        if (headerIndex[k] != null && headerIndex[k] > maxCol) maxCol = headerIndex[k];
-      });
-    }
-    const colIdx = (maxCol >= 0 ? maxCol : 3) + 1;
 
+    // 渡された headerIndex は stale な可能性があるため信用せず、実ヘッダ行を読み直す。
+    const readUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
+      encodeURIComponent(spreadsheetId) +
+      "/values/" + encodeURIComponent("diary!A1:Z1");
+    const readRes = await authedFetch(readUrl, { method: "GET" });
+    if (!readRes.ok) {
+      const errBody = await safeJson(readRes);
+      throw new Error((errBody && errBody.error && errBody.error.message) || ("HTTP " + readRes.status));
+    }
+    const readJson = await readRes.json();
+    const headers = (readJson.values && readJson.values[0]) || [];
+    const trimmed = headers.map(function (h) { return String(h).trim(); });
+
+    // 既に存在すればその位置を返す（冪等）。
+    let colIdx = trimmed.indexOf("audio_downloaded_at");
+    if (colIdx >= 0) {
+      if (headerIndex) headerIndex.audio_downloaded_at = colIdx;
+      return colIdx;
+    }
+
+    // 無ければ実ヘッダ幅の末尾へ追加する（未知の末尾列も上書きしない）。
+    colIdx = trimmed.length;
     const headerUrl = "https://sheets.googleapis.com/v4/spreadsheets/" +
       encodeURIComponent(spreadsheetId) +
       "/values/" + encodeURIComponent("diary!" + colLetter(colIdx) + "1") +
