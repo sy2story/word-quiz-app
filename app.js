@@ -1609,20 +1609,25 @@
   function pcmBase64ToWavBlob(base64, sampleRate) {
     const binary = atob(base64);
     const pcmLen = binary.length;            // バイト数（16bit なので偶数のはず）
-    const buffer = new ArrayBuffer(44 + pcmLen);
+
+    const numChannels = 1;
+    const bitsPerSample = 16;
+    const blockAlign = numChannels * bitsPerSample / 8;
+    const byteRate = sampleRate * blockAlign;
+
+    // 前後に 1 秒ずつの無音 (PCM 値 0) を挿入してプレイヤーの頭切れ/尻切れを防ぐ
+    const silenceBytes = sampleRate * blockAlign;   // 1 秒分
+    const dataLen = pcmLen + silenceBytes * 2;
+
+    const buffer = new ArrayBuffer(44 + dataLen);
     const view = new DataView(buffer);
 
     function writeStr(offset, str) {
       for (let i = 0; i < str.length; i++) view.setUint8(offset + i, str.charCodeAt(i));
     }
 
-    const numChannels = 1;
-    const bitsPerSample = 16;
-    const byteRate = sampleRate * numChannels * bitsPerSample / 8;
-    const blockAlign = numChannels * bitsPerSample / 8;
-
     writeStr(0, "RIFF");
-    view.setUint32(4, 36 + pcmLen, true);
+    view.setUint32(4, 36 + dataLen, true);
     writeStr(8, "WAVE");
     writeStr(12, "fmt ");
     view.setUint32(16, 16, true);            // fmt チャンクサイズ
@@ -1633,9 +1638,11 @@
     view.setUint16(32, blockAlign, true);
     view.setUint16(34, bitsPerSample, true);
     writeStr(36, "data");
-    view.setUint32(40, pcmLen, true);
+    view.setUint32(40, dataLen, true);
 
-    for (let i = 0; i < pcmLen; i++) view.setUint8(44 + i, binary.charCodeAt(i) & 0xff);
+    // 先頭 silenceBytes は 0 のまま（無音）。本体はその後ろに書く。末尾も 0 のまま。
+    const pcmStart = 44 + silenceBytes;
+    for (let i = 0; i < pcmLen; i++) view.setUint8(pcmStart + i, binary.charCodeAt(i) & 0xff);
 
     return new Blob([buffer], { type: "audio/wav" });
   }
